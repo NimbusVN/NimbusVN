@@ -1,0 +1,17 @@
+----------------------------------------------------------------------------
+NimbusVN 多内核分发说明 / Multi-engine distribution notice
+----------------------------------------------------------------------------
+NimbusVN 集成项目同时包含两个独立授权的引擎内核：
+
+1. engine/krkrsdl3（krkrsdl3）
+   适用上述 Kirikiri/Z 许可与「krkrsdl3补充条例」。以本仓库构建的
+   krkrsdl3 内核二进制分发时，仍须完整遵守上述条款。
+
+2. engine/openartemis（openartemis）
+   独立采用 MIT 或 GPL-3.0-or-later 二选一（SPDX:
+   MIT OR GPL-3.0-or-later），Copyright (c) 2026 deepseek。
+   完整文本见 engine/openartemis/src/LICENSE。
+
+两个内核通过构建系统聚合，彼此不改变对方的授权；分发包含两个内核的
+APK/HAP/桌面包时，请同时满足各自的许可要求。third_party/ 与 vcpkg 依赖
+仍分别遵循其原始许可。

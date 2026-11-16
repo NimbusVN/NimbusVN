@@ -1,0 +1,13 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "NimbusVN"
+    },
+    {
+      "name": "aware",
+      "value": "Request permission"
+    }
+
+  ]
+}

@@ -1,0 +1,65 @@
+{
+    "name": "nimbus-vn",
+    "version-string": "1.0.0",
+    "description": "Dual-engine build tree: krkrsdl3 (XP3/TJS) + openartemis (PFS/Artemis)",
+    "dependencies": [
+        "oniguruma",
+        "zlib",
+        {
+            "name" : "ffmpeg",
+            "platform": "!emscripten"
+        },
+        "libpng",
+        "libwebp",
+        "libjpeg-turbo",
+        "libvorbis",
+        "libtheora",
+        "opusfile",
+        "freetype",
+        "plutovg",
+        "physfs",
+
+        {
+            "name": "sdl3",
+            "features": ["vulkan"],
+            "platform": "!ios & !osx"
+        },
+        {
+            "name": "sdl3",
+            "platform": "ios | osx"
+        },
+        "sdl3-ttf",
+        "glm",
+        {
+            "name": "glad",
+            "features": ["loader"],
+            "platform": "windows | linux | osx"
+        },
+        {
+            "name": "glad",
+            "features": ["egl", "loader"],
+            "platform": "android | emscripten | ios"
+        },
+        {
+            "name": "vulkan",
+            "platform": "windows | android"
+        },
+        {
+            "name": "vulkan-headers",
+            "platform": "linux"
+        }
+    ],
+    "builtin-baseline": "8e8dfb4ba483886936ded5ca201b500b8d8b0096",
+    "overrides": [
+        {
+            "name": "ffmpeg",
+            "version": "6.1.1",
+            "port-version": 12
+        },
+        {
+            "name": "physfs",
+            "version": "3.2.0",
+            "port-version": 1
+        }
+    ]
+}

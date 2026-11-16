@@ -1,0 +1,104 @@
+plugins {
+    id 'com.android.application'
+}
+
+// 版本号唯一来源：根目录 CMakeLists.txt 的 NIMBUSVN_VERSION
+def nimbusVersionMatch = rootProject.file('../../CMakeLists.txt').text =~ /(?m)^\s*set\(NIMBUSVN_VERSION\s+"([^"]+)"\)/
+if (!nimbusVersionMatch.find()) {
+    throw new GradleException("CMakeLists.txt 中未找到 NIMBUSVN_VERSION")
+}
+def nimbusVersion = nimbusVersionMatch.group(1)
+def nimbusVersionParts = nimbusVersion =~ /^(\d+)\.(\d+)\.(\d+)(?:-(alpha|beta|rc)(?:\.(\d+))?)?$/
+if (!nimbusVersionParts.matches()) {
+    throw new GradleException("非法版本号: ${nimbusVersion}")
+}
+def nimbusMajor = nimbusVersionParts.group(1) as int
+def nimbusMinor = nimbusVersionParts.group(2) as int
+def nimbusPatch = nimbusVersionParts.group(3) as int
+def nimbusStage = nimbusVersionParts.group(4)
+def nimbusStageNum = nimbusVersionParts.group(5) ? nimbusVersionParts.group(5) as int : 0
+def nimbusStageRank = [alpha: 1, beta: 2, rc: 3].get(nimbusStage) ?: 9
+def nimbusVersionCode = nimbusMajor * 10000000 + nimbusMinor * 100000 + nimbusPatch * 1000 + nimbusStageRank * 100 + nimbusStageNum
+
+android {
+    // 一个 APK 打两个内核：
+    //   libkrkrsdl3.so   = krkrsdl3（XP3/TJS）
+    //   libopenartemis.so = openartemis（PFS/Artemis）
+    // 启动器 MainActivity 按游戏目录内容自动识别内核。
+    // Java 包统一在 org.nimbusvn.**（app 代码在 app/java/org/nimbusvn）；
+    // 只有 krkrsdl3 子模块自带的 KRKRActivity / KRKRCall 仍在 org.tvp.krkrsdl3，
+    // 由 JNI 按类名查找，保持不动。
+    namespace 'org.nimbusvn'
+    compileSdk 35
+    ndkVersion '28.0.13004108'
+    buildToolsVersion '34.0.0'
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        applicationId "org.nimbusvn"
+        minSdk 21
+        targetSdkVersion 35
+        externalNativeBuild {
+            cmake {
+                // ANDROID_PLATFORM 与 vcpkg 的 android triplet（API 28）保持一致。
+                arguments '-DANDROID_PLATFORM=android-28', '-DANDROID=true',
+                        '-DENGINE_KRKRSDL3=ON', '-DENGINE_OPENARTEMIS=ON',
+                        "-DCMAKE_TOOLCHAIN_FILE=${System.getenv('VCPKG_ROOT')}/scripts/buildsystems/vcpkg.cmake",
+                        "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${System.getenv('ANDROID_NDK_HOME')}/build/cmake/android.toolchain.cmake"
+                abiFilters 'arm64-v8a', 'armeabi-v7a'
+            }
+        }
+        versionCode nimbusVersionCode
+        versionName nimbusVersion
+        resValue "string", "app_version", "v${nimbusVersion}"
+    }
+    buildTypes {
+        release {
+            debuggable false
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled false
+            debuggable true
+        }
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            // java/ 下是启动器；内核 Activity 在各自子模块里：
+            // krkrsdl3 -> KRKRActivity / KRKRCall，openartemis -> GameActivity。
+            java.srcDirs = ['java',
+                            '../../../engine/krkrsdl3/src/environ/android',
+                            '../../../engine/openartemis/src/environ/android']
+            res.srcDirs = ['res']
+            assets.srcDirs = ['../../../Res']
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            version '3.31.1'
+            buildStagingDirectory '../../../out/android'
+            path '../../../CMakeLists.txt'
+        }
+    }
+    android.applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "NimbusVN_v${defaultConfig.versionName}.apk"
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.4.1'
+    implementation 'com.google.android.material:material:1.5.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.3'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.3'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
+}

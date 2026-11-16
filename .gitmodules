@@ -1,0 +1,6 @@
+[submodule "engine/krkrsdl3"]
+	path = engine/krkrsdl3/src
+	url = https://github.com/krkrsdl3/krkrsdl3.git
+[submodule "engine/openartemis"]
+	path = engine/openartemis/src
+	url = https://github.com/NimbusVN/openartemis.git

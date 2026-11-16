@@ -1,0 +1,294 @@
+# ---------------------------------------------------------------------------
+# openartemis 内核（engine/openartemis 子模块）的构建接线。
+#
+# 子模块内部按 krkrsdl3 的风格收敛为 core/ + environ/（不再自带
+# 顶层 CMakeLists / android / web / cmake / script），构建与平台壳全部由
+# 超工程负责：根 CMakeLists 统合两个引擎，平台壳在 platform/ 下。
+#
+# 目标：
+#   libopenartemis  — 引擎静态库（core/，C++20）
+#   openartemis     — 宿主（桌面/WASM 可执行文件；Android 为 .so）
+#   lua51           — vendored Lua 5.1.5
+# ---------------------------------------------------------------------------
+
+set(OA_ROOT ${OPENARTEMIS_ROOT})
+
+if(NOT EXISTS ${OA_ROOT}/core/runtime/runtime.cpp)
+    message(FATAL_ERROR "openartemis 子模块缺失：先执行 git submodule update --init --recursive")
+endif()
+
+# ---------------------------------------------------------------------------
+# Real-asset tests 的包路径（与子模块 docs/TESTING.md 同一套 OA_* 变量）。
+# 未设置时相关测试自跳（exit 77）。
+# ---------------------------------------------------------------------------
+set(OA_TEST_FPM_PFS "" CACHE FILEPATH "Path to a real Artemis root.pfs for regression tests (or set the OA_TEST_FPM_PFS env var at configure time)")
+if(NOT OA_TEST_FPM_PFS AND DEFINED ENV{OA_TEST_FPM_PFS})
+    set(OA_TEST_FPM_PFS "$ENV{OA_TEST_FPM_PFS}" CACHE FILEPATH "" FORCE)
+endif()
+set(OA_TEST_NEKOMIKO_PFS "" CACHE FILEPATH "Path to the NekoMiko root.pfs (U6b assets; or set the OA_TEST_NEKOMIKO_PFS env var at configure time)")
+if(NOT OA_TEST_NEKOMIKO_PFS AND DEFINED ENV{OA_TEST_NEKOMIKO_PFS})
+    set(OA_TEST_NEKOMIKO_PFS "$ENV{OA_TEST_NEKOMIKO_PFS}" CACHE FILEPATH "" FORCE)
+endif()
+set(OA_TEST_RR_PFS "" CACHE FILEPATH "Path to the 常轨脱离ReReCall root.pfs (rr movie assets; or set the OA_TEST_RR_PFS env var at configure time)")
+if(NOT OA_TEST_RR_PFS AND DEFINED ENV{OA_TEST_RR_PFS})
+    set(OA_TEST_RR_PFS "$ENV{OA_TEST_RR_PFS}" CACHE FILEPATH "" FORCE)
+endif()
+set(OA_TEST_TG3_PFS "" CACHE FILEPATH "Path to the 甜蜜女友3 root.pfs (tg3 emote assets; or set the OA_TEST_TG3_PFS env var at configure time)")
+if(NOT OA_TEST_TG3_PFS AND DEFINED ENV{OA_TEST_TG3_PFS})
+    set(OA_TEST_TG3_PFS "$ENV{OA_TEST_TG3_PFS}" CACHE FILEPATH "" FORCE)
+endif()
+set(OA_TEST_T5_PFS "" CACHE FILEPATH "Path to the B42 (test5) root.pfs (or set the OA_TEST_T5_PFS env var at configure time)")
+if(NOT OA_TEST_T5_PFS AND DEFINED ENV{OA_TEST_T5_PFS})
+    set(OA_TEST_T5_PFS "$ENV{OA_TEST_T5_PFS}" CACHE FILEPATH "" FORCE)
+endif()
+set(OA_TEST_T13_PFS "" CACHE FILEPATH "Path to the test13 (Aiyoku no Eustia) root.pfs (or set the OA_TEST_T13_PFS env var at configure time)")
+if(NOT OA_TEST_T13_PFS AND DEFINED ENV{OA_TEST_T13_PFS})
+    set(OA_TEST_T13_PFS "$ENV{OA_TEST_T13_PFS}" CACHE FILEPATH "" FORCE)
+endif()
+
+# ---------------------------------------------------------------------------
+# ASan：只插桩 openartemis 自己的 TU（vcpkg 依赖保持原样）。
+# ---------------------------------------------------------------------------
+if(OA_ENABLE_ASAN)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address)
+endif()
+
+# ---------------------------------------------------------------------------
+# libopenartemis：引擎库
+# ---------------------------------------------------------------------------
+add_library(libopenartemis STATIC
+    ${OA_ROOT}/core/version.cpp
+    ${OA_ROOT}/core/util/sha1.cpp
+    ${OA_ROOT}/core/util/charset.cpp
+    ${OA_ROOT}/core/fs/project.cpp
+    ${OA_ROOT}/core/fs/physfs_fs.cpp
+    ${OA_ROOT}/core/util/binary_stream.cpp
+    ${OA_ROOT}/core/runtime/runtime.cpp
+    ${OA_ROOT}/core/runtime/runtime_media.cpp
+    ${OA_ROOT}/core/runtime/runtime_save.cpp
+    ${OA_ROOT}/core/runtime/runtime_save_official.cpp
+    ${OA_ROOT}/core/runtime/runtime_lua.cpp
+    ${OA_ROOT}/core/runtime/runtime_iet.cpp
+    ${OA_ROOT}/core/render/layer.cpp
+    ${OA_ROOT}/core/render/backend_gles.cpp
+    ${OA_ROOT}/core/render/backend_sdl.cpp
+    ${OA_ROOT}/core/render/font.cpp
+    ${OA_ROOT}/core/render/renderer.cpp
+    ${OA_ROOT}/core/render/text.cpp
+    ${OA_ROOT}/core/emote/psb_reader.cpp
+    ${OA_ROOT}/core/emote/emote_file.cpp
+    ${OA_ROOT}/core/emote/emote_render.cpp
+    ${OA_ROOT}/core/emote/emote_player.cpp
+    ${OA_ROOT}/core/emote/emote_physics.cpp
+    ${OA_ROOT}/core/emote/bc7decomp.cpp
+    ${OA_ROOT}/core/media/audio.cpp
+    ${OA_ROOT}/core/media/decode_pool.cpp
+    ${OA_ROOT}/core/media/image.cpp
+    ${OA_ROOT}/core/media/video.cpp
+)
+target_include_directories(libopenartemis PUBLIC ${OA_ROOT})
+target_compile_features(libopenartemis PUBLIC cxx_std_20)
+set_target_properties(libopenartemis PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+if(MSVC)
+    target_compile_definitions(libopenartemis PUBLIC _CRT_SECURE_NO_WARNINGS)
+endif()
+
+find_package(SDL3 CONFIG REQUIRED)
+find_package(Vorbis CONFIG REQUIRED)
+find_package(unofficial-theora CONFIG REQUIRED)
+find_package(PNG CONFIG REQUIRED)
+find_package(Freetype CONFIG REQUIRED)
+find_package(JPEG REQUIRED)
+find_package(PhysFS CONFIG REQUIRED)
+find_package(ZLIB CONFIG REQUIRED)
+target_link_libraries(libopenartemis PUBLIC
+    SDL3::SDL3
+    lua51
+    Vorbis::vorbisfile
+    unofficial::theora::theora
+    PNG::PNG
+    Freetype::Freetype
+    JPEG::JPEG
+    ZLIB::ZLIB
+    $<IF:$<TARGET_EXISTS:PhysFS::PhysFS>,PhysFS::PhysFS,PhysFS::PhysFS-static>)
+
+# 可选 FFmpeg 视频后端（WMV/ASF 等容器）。
+find_package(FFMPEG QUIET)
+if(FFMPEG_FOUND)
+    target_compile_definitions(libopenartemis PUBLIC OA_HAVE_FFMPEG=1)
+    target_include_directories(libopenartemis SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
+    target_link_directories(libopenartemis PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    nimbus_link_ffmpeg(libopenartemis)
+    message(STATUS "openartemis: FFmpeg video backend ENABLED (${FFMPEG_LIBRARIES})")
+else()
+    message(STATUS "openartemis: FFmpeg video backend DISABLED (not installed) — Ogg/Theora only")
+endif()
+
+if(MSVC)
+    target_compile_options(libopenartemis PRIVATE /W4)
+else()
+    target_compile_options(libopenartemis PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# libFuzzer 覆盖率必须覆盖整个库，否则引导信号只剩目标那几十个 PC。
+if(OA_ENABLE_FUZZ AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(libopenartemis PRIVATE -fsanitize-coverage=inline-8bit-counters,pc-table,trace-cmp)
+endif()
+
+# ---------------------------------------------------------------------------
+# vendored Lua 5.1.5
+# ---------------------------------------------------------------------------
+set(LUA51_SRC_DIR ${OA_ROOT}/third_party/lua-5.1.5/src)
+add_library(lua51 STATIC
+    ${LUA51_SRC_DIR}/lapi.c
+    ${LUA51_SRC_DIR}/lauxlib.c
+    ${LUA51_SRC_DIR}/lbaselib.c
+    ${LUA51_SRC_DIR}/lcode.c
+    ${LUA51_SRC_DIR}/ldblib.c
+    ${LUA51_SRC_DIR}/ldebug.c
+    ${LUA51_SRC_DIR}/ldo.c
+    ${LUA51_SRC_DIR}/ldump.c
+    ${LUA51_SRC_DIR}/lfunc.c
+    ${LUA51_SRC_DIR}/lgc.c
+    ${LUA51_SRC_DIR}/linit.c
+    ${LUA51_SRC_DIR}/liolib.c
+    ${LUA51_SRC_DIR}/llex.c
+    ${LUA51_SRC_DIR}/lmathlib.c
+    ${LUA51_SRC_DIR}/lmem.c
+    ${LUA51_SRC_DIR}/loadlib.c
+    ${LUA51_SRC_DIR}/lobject.c
+    ${LUA51_SRC_DIR}/lopcodes.c
+    ${LUA51_SRC_DIR}/loslib.c
+    ${LUA51_SRC_DIR}/lparser.c
+    ${LUA51_SRC_DIR}/lstate.c
+    ${LUA51_SRC_DIR}/lstring.c
+    ${LUA51_SRC_DIR}/lstrlib.c
+    ${LUA51_SRC_DIR}/ltable.c
+    ${LUA51_SRC_DIR}/ltablib.c
+    ${LUA51_SRC_DIR}/ltm.c
+    ${LUA51_SRC_DIR}/lundump.c
+    ${LUA51_SRC_DIR}/lvm.c
+    ${LUA51_SRC_DIR}/lzio.c
+    ${LUA51_SRC_DIR}/print.c
+)
+target_include_directories(lua51 PUBLIC ${LUA51_SRC_DIR})
+target_compile_options(lua51 PRIVATE -w)
+if(NOT MSVC)
+    target_compile_options(lua51 PRIVATE -fPIC)
+endif()
+
+# ---------------------------------------------------------------------------
+# 宿主：桌面/WASM 为可执行文件，Android 为 libopenartemis.so
+# ---------------------------------------------------------------------------
+if(EMSCRIPTEN)
+    set(OA_HOST_PLATFORM ${OA_ROOT}/environ/platform/platform_wasm.cpp)
+elseif(ANDROID)
+    set(OA_HOST_PLATFORM ${OA_ROOT}/environ/platform/platform_android.cpp)
+else()
+    set(OA_HOST_PLATFORM ${OA_ROOT}/environ/platform/platform_desktop.cpp)
+endif()
+
+if(ANDROID)
+    add_library(openartemis SHARED
+        ${OA_ROOT}/environ/main.cpp
+        ${OA_HOST_PLATFORM})
+    set_target_properties(openartemis PROPERTIES OUTPUT_NAME "openartemis")
+else()
+    add_executable(openartemis
+        ${OA_ROOT}/environ/main.cpp
+        ${OA_HOST_PLATFORM})
+endif()
+target_include_directories(openartemis PRIVATE ${OA_ROOT}/environ)
+target_link_libraries(openartemis PRIVATE libopenartemis SDL3::SDL3)
+set_target_properties(openartemis PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+
+if(EMSCRIPTEN)
+    # 浏览器壳：IDBFS 存档挂载、MEMFS 大包、pthreads + 异常。
+    # 与 krkrsdl3 的 index.html 分目录输出。
+    set_target_properties(openartemis PROPERTIES
+        SUFFIX ".html"
+        OUTPUT_NAME "index"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/openartemis")
+    target_link_options(openartemis PRIVATE
+        -lidbfs.js
+        -sFORCE_FILESYSTEM=1
+        -sALLOW_MEMORY_GROWTH=1
+        -sNO_EXIT_RUNTIME=1
+        -sINVOKE_RUN=0
+        -sSTACK_SIZE=4MB
+        -sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall,cwrap,UTF8ToString
+        --shell-file "${CMAKE_SOURCE_DIR}/platform/emscripten/openartemis_shell.html")
+    set_property(TARGET openartemis APPEND PROPERTY
+        LINK_DEPENDS "${CMAKE_SOURCE_DIR}/platform/emscripten/openartemis_shell.html")
+    target_compile_options(openartemis PRIVATE -fexceptions)
+    target_link_options(openartemis PRIVATE -fexceptions -sDISABLE_EXCEPTION_CATCHING=0)
+    target_link_options(openartemis PRIVATE -sPTHREAD_POOL_SIZE=6)
+elseif(ANDROID)
+    target_link_libraries(openartemis PRIVATE EGL GLESv3)
+    target_link_options(openartemis PRIVATE $<$<CONFIG:Release>:-s>)
+endif()
+
+if(MSVC)
+    target_compile_options(openartemis PRIVATE /W4)
+else()
+    target_compile_options(openartemis PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+# ---------------------------------------------------------------------------
+# 工具（仅桌面）
+# ---------------------------------------------------------------------------
+if(OA_BUILD_TOOLS AND NOT ANDROID AND NOT EMSCRIPTEN)
+    add_subdirectory(${OA_ROOT}/tools ${CMAKE_BINARY_DIR}/openartemis-tools)
+endif()
+
+# ---------------------------------------------------------------------------
+# 单元测试 / 真包测试（仅桌面）
+# ---------------------------------------------------------------------------
+if(OA_ENABLE_TESTS AND NOT ANDROID AND NOT EMSCRIPTEN)
+    enable_testing()
+    add_subdirectory(${OPENARTEMIS_DIR}/tests ${CMAKE_BINARY_DIR}/openartemis-tests)
+endif()
+
+# ---------------------------------------------------------------------------
+# 模糊测试（仅桌面；独立开关，通常不和全量单测一起开）
+# ---------------------------------------------------------------------------
+if(OA_ENABLE_FUZZ AND NOT ANDROID AND NOT EMSCRIPTEN)
+    set(OA_FUZZ_LIBFUZZER_OK OFF)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set(OA_FUZZ_LIBFUZZER_RUNTIME "" CACHE FILEPATH
+            "libFuzzer runtime archive (empty = auto-detect from clang -print-resource-dir)")
+        if(NOT OA_FUZZ_LIBFUZZER_RUNTIME)
+            execute_process(COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
+                            OUTPUT_VARIABLE _oa_clang_rt
+                            OUTPUT_STRIP_TRAILING_WHITESPACE
+                            RESULT_VARIABLE _oa_clang_rt_rc)
+            if(_oa_clang_rt_rc EQUAL 0)
+                if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+                    set(_oa_fuzzer_arch x86_64)
+                else()
+                    set(_oa_fuzzer_arch i386)
+                endif()
+                foreach(_pat
+                        "${_oa_clang_rt}/lib/windows/libclang_rt.fuzzer-${_oa_fuzzer_arch}.a"
+                        "${_oa_clang_rt}/lib/windows/libclang_rt.fuzzer-*.a"
+                        "${_oa_clang_rt}/lib/*/libclang_rt.fuzzer-*.a")
+                    if(OA_FUZZ_LIBFUZZER_RUNTIME)
+                        break()
+                    endif()
+                    file(GLOB _oa_hit "${_pat}")
+                    if(_oa_hit)
+                        list(GET _oa_hit 0 OA_FUZZ_LIBFUZZER_RUNTIME)
+                    endif()
+                endforeach()
+            endif()
+        endif()
+        if(OA_FUZZ_LIBFUZZER_RUNTIME AND EXISTS "${OA_FUZZ_LIBFUZZER_RUNTIME}")
+            set(OA_FUZZ_LIBFUZZER_OK ON)
+            message(STATUS "openartemis: fuzz targets = libFuzzer (${OA_FUZZ_LIBFUZZER_RUNTIME})")
+        else()
+            message(STATUS "openartemis: fuzz targets = brute mode (no libFuzzer runtime)")
+        endif()
+    endif()
+    add_subdirectory(${OA_ROOT}/tests/fuzz ${CMAKE_BINARY_DIR}/openartemis-fuzz)
+endif()
