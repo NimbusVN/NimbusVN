@@ -116,6 +116,8 @@ option(ENABLE_AUTOTEST "Build the offscreen AutoTest host (tests/autotest.md)" O
 # 视频解码后端: ON=FFmpeg, OFF=系统API(MediaFoundation/MediaCodec)
 # 感觉没必要禁用，OFF的实现基本没用༼ ༎ຶ ෴ ༎ຶ༽
 option(USE_FFMPEG "Use FFmpeg for video/audio decoding" ON)
+# 额外的独立视频解码后端：libtheora（不经过 FFmpeg 的解码器接入示范）
+option(USE_THEORA_DECODER "Build the standalone libtheora movie backend" OFF)
 # 图形后端编译选项
 option(USE_RENDER_GL "OpenGL 3.3+/OpenGLES 3.0+ backend" ON)
 option(USE_RENDER_VK "Vulkan backend" ON)

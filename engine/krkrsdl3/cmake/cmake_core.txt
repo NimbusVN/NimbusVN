@@ -28,6 +28,12 @@ set(KRKRSDL_CORE_SRC
     ${KRKRSDL_CORE_PATH}/media/image/SaveTLG6.cpp
     ${KRKRSDL_CORE_PATH}/media/image/TVPGraphicsLoader.cpp
     ${KRKRSDL_CORE_PATH}/media/movie/krmovie.cpp
+    ${KRKRSDL_CORE_PATH}/media/movie/TVPMovieBackend.cpp
+    ${KRKRSDL_CORE_PATH}/media/movie/TVPMovieIO.cpp
+    ${KRKRSDL_CORE_PATH}/media/movie/TVPMoviePixels.cpp
+    ${KRKRSDL_CORE_PATH}/media/movie/TVPMoviePlayer.cpp
+    ${KRKRSDL_CORE_PATH}/media/movie/TVPMoviePresenter.cpp
+    ${KRKRSDL_CORE_PATH}/media/movie/TVPMovieTypes.cpp
     ${KRKRSDL_CORE_PATH}/media/sound/RIFFWaveDecoder.cpp
     ${KRKRSDL_CORE_PATH}/media/sound/TVPWaveManager.cpp
     ${KRKRSDL_CORE_PATH}/media/sound/WaveDecodeThread.cpp
@@ -85,20 +91,12 @@ set(KRKRSDL_CORE_SRC
 )
 
 set(KRKRSDL_CORE_FFMPEG_SRC
-    ${KRKRSDL_CORE_PATH}/media/movie/CodecAudioFFmpeg.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/CodecDemuxFFmpeg.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/CodecVideoFFmpeg.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/InputStream.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/krffmpeg.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/KRMovieLayer.cpp
-	${KRKRSDL_CORE_PATH}/media/movie/KRMovieOverlay.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/KRStreamInfo.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/Message.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/MessageQueue.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/VideoPlayer.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/VideoPlayerAudio.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/VideoPlayerVideo.cpp
-    ${KRKRSDL_CORE_PATH}/media/movie/VideoReferenceClock.cpp
+    ${KRKRSDL_CORE_PATH}/media/movie/TVPMovieFFmpeg.cpp
+)
+
+# 可选的独立解码后端（不依赖 FFmpeg 的解码器接入示范）
+set(KRKRSDL_CORE_THEORA_SRC
+    ${KRKRSDL_CORE_PATH}/media/movie/TVPMovieTheora.cpp
 )
 
 set(KRKRSDL_CORE_OPENGL_SRC
