@@ -455,3 +455,11 @@ target_link_libraries(t13_backlog_test PRIVATE libopenartemis)
 add_test(NAME t13_backlog COMMAND t13_backlog_test)
 set_tests_properties(t13_backlog PROPERTIES
   ENVIRONMENT "OA_TEST_T13_PFS=${OA_TEST_T13_PFS}" SKIP_RETURN_CODE 77)
+
+# test13: every message-window button opens/closes and leaves the story page
+# the reader was on, still advanceable ([yesno] dialogs + handler-issued jumps).
+add_executable(t13_dock_test t13_dock_test.cpp)
+target_link_libraries(t13_dock_test PRIVATE libopenartemis lua51)
+add_test(NAME t13_dock COMMAND t13_dock_test)
+set_tests_properties(t13_dock PROPERTIES
+  ENVIRONMENT "OA_TEST_T13_PFS=${OA_TEST_T13_PFS}" SKIP_RETURN_CODE 77)
