@@ -23,7 +23,7 @@
 
 #include "core/fs/fs.h"
 #include "core/runtime/runtime_game.h"
-#include "fpm/host_input.h"
+#include "fpm/test_host.h"
 #include "core/runtime/runtime_save.h"
 #include "core/runtime/runtime_save.h"
 #include "core/util/binary_stream.h"
@@ -143,7 +143,11 @@ std::shared_ptr<MemFs> loader_fs() {
 }
 
 // ---------------------------------------------------------------------------
-// T1/T2: system saves (saveg.dat/system.dat)
+// T1/T2: engine domain saves (saveg.oa.dat / system.oa.dat)
+//
+// 契约（重构后）：system.dat / saveg.dat 是**游戏**的文件名（pluto 容器），
+// 引擎不再写它们；引擎只写自己的 *.oa.dat，sysload 只读自己的、并保留对
+// 旧名字的只读迁移（旧版本 OASB / 官方 BOW*）。
 // ---------------------------------------------------------------------------
 void test_syssave_sysload() {
     auto store = std::make_shared<MemSaveStore>();
@@ -156,7 +160,9 @@ void test_syssave_sysload() {
         rt.open_project("windows");
         rt.boot_project();
         // First boot with no save files: sysload stays silent; domains empty.
-        check(!store->exists("save/saveg.dat"), "T1 first boot has no saveg.dat");
+        check(!store->exists("save/saveg.oa.dat"), "T1 first boot has no saveg.oa.dat");
+        check(!store->exists("save/saveg.dat"),
+              "T1 first boot writes no game-owned saveg.dat");
         check(!rt.interpreter().variables().get("s.bgmvol").has_value(),
               "T1 no default system vars from files (Lua seeds its own)");
         // Persist g./s. domains like a no-file [save].
@@ -165,9 +171,11 @@ void test_syssave_sysload() {
                                       oa::runtime::Value::make_int(3));
         rt.interpreter().set_variable("s.bgmvol",
                                       oa::runtime::Value::make_int(700));
-        check(rt.syssave(), "T2 syssave writes the system files");
-        check(store->exists("save/saveg.dat") && store->exists("save/system.dat"),
-              "T2 saveg.dat + system.dat written under savepath");
+        check(rt.syssave(), "T2 syssave writes the engine domain files");
+        check(store->exists("save/saveg.oa.dat") && store->exists("save/system.oa.dat"),
+              "T2 saveg.oa.dat + system.oa.dat written under savepath");
+        check(!store->exists("save/saveg.dat") && !store->exists("save/system.dat"),
+              "T2 syssave never touches the game-owned system.dat/saveg.dat");
     }
     {
         // New runtime, same store: boot sysload restores the persisted domains.
@@ -194,12 +202,41 @@ void test_syssave_sysload() {
         e.kind = oa::runtime::Event::Kind::ConfigEvent;
         e.tag = "save";
         rt.apply_save_event(e);
-        const auto more = store->read("save/saveg.dat");
+        const auto more = store->read("save/saveg.oa.dat");
         check(more.has_value() &&
                   oa::runtime::decode_domain_map(std::string(more->begin(), more->end()))
                           .count("more") == 1,
               "T2 [save] without file persists the g. domain");
+        check(!store->exists("save/saveg.dat"),
+              "T2 [save] without file still leaves the game file alone");
     }
+}
+
+// T2b: 旧版本引擎把 OASB 写进了 system.dat。OASB 容器同时是游戏 pluto 的
+// 载体，仅凭魔数分不出"引擎域文档"和"游戏 sys 表"，所以这份文件既不导入、
+// 也不搬走、更不覆盖——原字节保留，引擎改用 *.oa.dat 重新建立。
+void test_legacy_oasb_left_alone() {
+    auto store = std::make_shared<MemSaveStore>();
+    std::map<std::string, oa::runtime::Value> legacy;
+    legacy["bgmvol"] = oa::runtime::Value::make_int(640);
+    const std::string doc = oa::runtime::encode_domain_map(legacy);
+    store->files["save/system.dat"] = {doc.begin(), doc.end()};
+
+    auto fs = std::make_shared<MemFs>();
+    fs->files["system.ini"] = project_ini();
+    fs->files["system/first.iet"] = "*main\n[stop]\n";
+    oa::runtime::GameRuntime rt(fs);
+    rt.set_save_store(store);
+    rt.open_project("windows");
+    rt.boot_project();
+
+    const auto before = store->files.at("save/system.dat");
+    check(before == std::vector<uint8_t>(doc.begin(), doc.end()),
+          "T2b legacy OASB system.dat left byte-identical");
+    check(!store->exists("save/system.oa.dat"),
+          "T2b no engine domain file is fabricated from an ambiguous document");
+    check(!rt.interpreter().variables().get("s.bgmvol").has_value(),
+          "T2b ambiguous OASB is not imported into the s. domain");
 }
 
 // ---------------------------------------------------------------------------
@@ -585,7 +622,8 @@ void test_real_dir_store() {
         rt.boot_project();
         rt.interpreter().set_variable("g.tag", oa::runtime::Value::make_string("ok"));
         check(rt.syssave(), "T7 real dir syssave ok");
-        check(fs::exists(root / "save" / "saveg.dat", ec), "T7 saveg.dat on disk");
+        check(fs::exists(root / "save" / "saveg.oa.dat", ec),
+          "T7 saveg.oa.dat on disk (engine domain file)");
     }
     {
         auto mfs = std::make_shared<MemFs>();
@@ -606,6 +644,7 @@ void test_real_dir_store() {
 
 int main() {
     test_syssave_sysload();
+    test_legacy_oasb_left_alone();
     test_numbered_save_load();
     test_screenshots_and_files();
     test_formats();

@@ -33,8 +33,10 @@
 #include "core/fs/fs.h"
 #include "core/runtime/runtime_save.h"
 #include "core/render/layer.h"
+#include "core/render/renderer.h"
+#include "core/media/image.h"
 #include "core/runtime/runtime_game.h"
-#include "fpm/host_input.h"
+#include "fpm/test_host.h"
 #include "core/runtime/runtime_save.h"
 
 namespace {
@@ -614,6 +616,44 @@ void test_events_emitted_during_load_dispatch_survive() {
           "reaches the host pump");
 }
 
+// ---------------------------------------------------------------------------
+// S10 — 覆盖存档：缩略图的解码/纹理缓存必须失效
+//
+// [savess] 是**原地重写** saveNNNN.png：打开存档界面时旧图已经按层 content
+// key（不带扩展名的存档路径）解码进缓存并画在槽位上，覆盖后框架按同 id 重建
+// 缩略图层 —— 缓存不失效就永远命中旧图（"覆盖存档后缩略图不换"）。
+// ---------------------------------------------------------------------------
+void test_save_thumb_cache_invalidation() {
+    MemFs fs;
+    const auto make_png = [](uint32_t w, uint32_t h, uint8_t r) {
+        std::vector<uint8_t> px(size_t(w) * h * 4, 0);
+        for (size_t i = 0; i < px.size(); i += 4) {
+            px[i] = r;
+            px[i + 3] = 255;
+        }
+        return oa::media::encode_png(w, h, px);
+    };
+    const auto set_file = [&fs](const char* path, const std::vector<uint8_t>& bytes) {
+        fs.files[path] = std::string(bytes.begin(), bytes.end());
+    };
+
+    set_file("save/thumb.png", make_png(4, 4, 0x20));
+    oa::render::RenderEngine eng(&fs, static_cast<oa::render::RenderHost*>(nullptr),
+                                 /*bind_hooks=*/false);
+    const oa::media::Image* img = eng.resolve_image("save/thumb");
+    check(img && img->w == 4 && img->h == 4, "S10 initial thumbnail decodes (4x4)");
+
+    set_file("save/thumb.png", make_png(8, 2, 0xE0));
+    img = eng.resolve_image("save/thumb");
+    check(img && img->w == 4 && img->h == 4,
+          "S10 without invalidation the old pixels stay cached (documents the bug)");
+
+    eng.forget_asset("save/thumb");
+    img = eng.resolve_image("save/thumb");
+    check(img && img->w == 8 && img->h == 2,
+          "S10 forget_asset drops the cache so the rewritten thumbnail is re-decoded");
+}
+
 } // namespace
 
 int main() {
@@ -629,6 +669,7 @@ int main() {
     test_tag_queue_preserved_across_load();
     test_failed_load_is_atomic();
     test_events_emitted_during_load_dispatch_survive();
+    test_save_thumb_cache_invalidation();
     if (failures == 0) {
         std::printf("save_compat_test: all checks passed\n");
         return 0;

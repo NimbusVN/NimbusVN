@@ -28,7 +28,7 @@ extern "C" {
 
 #include "core/fs/fs.h"
 #include "core/runtime/runtime_game.h"
-#include "fpm/host_input.h"
+#include "fpm/test_host.h"
 
 namespace {
 int failures = 0;
@@ -319,7 +319,7 @@ void test_r5_decide_after_reveal_gate_releases() {
     h.run_lua("oa_armed=true");
     h.tick(-5, -5);
     const oa::render::MessageLayer* ml = h.rt->text().layer("adv01");
-    check(ml && ml->reveal_index >= ml->char_count && !ml->reveal_pending,
+    check(ml && ml->done,
           "R5-2 first decide revealed the full page");
     check(h.rt->current_wait() &&
               h.rt->current_wait()->waiting_click(),

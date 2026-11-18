@@ -575,8 +575,9 @@ std::string as_bytes(const std::vector<uint8_t>& v) {
     return std::string(v.begin(), v.end());
 }
 
-/// 官方 savedata 落到存档根 → boot 必须把 s./g. 灌进来，覆盖存档时官方原件
-/// 必须被备份成 `<file>.official.bak`，主文件变成 OASB。
+/// 官方 savedata 落到存档根 → boot 必须把 s./g. 灌进来；而引擎**不许**
+/// 覆盖官方原件：它只写自己的 *.oa.dat，system.dat/saveg.dat 原样留给
+/// 原生引擎与游戏自己。
 void test_sysload_end_to_end() {
     const auto sys_doc = bowx({
         {"s.bgmvol", "80"},
@@ -617,25 +618,29 @@ void test_sysload_end_to_end() {
               gscript->str_val == pluto_blob,
           "g.* value imported byte-exactly (Pluto blob untouched)");
 
-    // 第一次 syssave：官方原件必须留一份，主文件必须换成本引擎的 OASB。
-    check(rt.syssave(), "syssave succeeds over an official save");
-    check(store->files.count("save/system.dat.official.bak") == 1,
-          "official system.dat backed up before overwrite");
-    check(store->files.count("save/saveg.dat.official.bak") == 1,
-          "official saveg.dat backed up before overwrite");
-    check(!oa::runtime::is_official_save(as_bytes(store->files.at("save/system.dat"))),
-          "system.dat rewritten in the engine's own format");
-    const auto backup = as_bytes(store->files.at("save/system.dat.official.bak"));
-    check(oa::runtime::is_official_save(backup), "backup still decodes as an official save");
-    check(oa::runtime::decode_official_save(backup).variables.size() == 3,
-          "backup keeps all official keys");
+    // syssave：官方原件必须**原样不动**（我们不再用那个文件名），引擎的
+    // 变量域落到自己的 saveg.oa.dat / system.oa.dat。
+    const auto system_before = store->files.at("save/system.dat");
+    const auto saveg_before = store->files.at("save/saveg.dat");
+    check(rt.syssave(), "syssave succeeds next to an official save");
+    check(store->files.count("save/system.oa.dat") == 1 &&
+              store->files.count("save/saveg.oa.dat") == 1,
+          "engine domain files written as *.oa.dat");
+    check(store->files.at("save/system.dat") == system_before,
+          "official system.dat left byte-identical");
+    check(store->files.at("save/saveg.dat") == saveg_before,
+          "official saveg.dat left byte-identical");
+    check(oa::runtime::is_official_save(as_bytes(store->files.at("save/system.dat"))),
+          "official system.dat still decodes as an official save");
+    check(oa::runtime::decode_official_save(as_bytes(store->files.at("save/system.dat")))
+                  .variables.size() == 3,
+          "official document keeps all keys after syssave");
 
-    // 第二次 syssave 不许再覆盖备份（只保第一份原件）。
-    const auto saved_backup = store->files.at("save/system.dat.official.bak");
+    // 第二次 syssave 同样不碰官方文件。
     rt.interpreter().set_variable("s.bgmvol", oa::runtime::Value::make_int(10));
     check(rt.syssave(), "second syssave succeeds");
-    check(store->files.at("save/system.dat.official.bak") == saved_backup,
-          "second syssave leaves the backup untouched");
+    check(store->files.at("save/system.dat") == system_before,
+          "second syssave still leaves the official file untouched");
 }
 
 /// BOWS 槽位夹具：变量 bank + 字段 26/24/25/29/11/4/3。

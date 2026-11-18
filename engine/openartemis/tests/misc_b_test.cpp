@@ -20,7 +20,7 @@
 
 #include "core/fs/fs.h"
 #include "core/runtime/runtime_game.h"
-#include "fpm/host_input.h"
+#include "fpm/test_host.h"
 #include "core/runtime/runtime_save.h"
 #include "ogg_fixture.h"
 
@@ -156,21 +156,29 @@ void test_file_update_time_bridge() {
     oa::runtime::GameRuntime rt(fs);
     rt.open_project("windows");
     rt.boot_project();
-    // Canned mtime for deterministic formatting.
-    rt.interpreter().hooks().file_mtime = [](const std::string&)
-        -> std::optional<std::array<int64_t, 6>> {
-        return std::array<int64_t, 6>{2026, 9, 4, 7, 17, 5};
-    };
+    // 真存档目录：mtime 由文件自己决定，用 store 读回来的分量对齐断言。
+    std::error_code ec;
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path(ec) / "oa_misc_b_w2";
+    std::filesystem::remove_all(dir, ec);
+    auto store = std::make_shared<oa::runtime::DirSaveStore>(dir.string());
+    rt.set_save_store(store);
+    store->write("save/save0001.dat", std::vector<uint8_t>{1, 2, 3});
+    const auto mt = store->modification_time("save/save0001.dat");
+    check(mt.has_value(), "W2 store reports the file mtime");
+
     rt.interpreter().apply_var({{"system", "file_update_time"},
                                 {"name", "t.tmp"},
                                 {"file", "save/save0001.dat"},
                                 {"format", "yyyy/MM/dd\nhh:mm"}});
     const auto v = rt.interpreter().variables().get("t.tmp");
-    check(v && v->kind == oa::runtime::ValueKind::String && v->str_val == "2026/09/04\n07:17",
+    char want[64];
+    std::snprintf(want, sizeof(want), "%04lld/%02lld/%02lld\n%02lld:%02lld",
+                  (long long)(*mt)[0], (long long)(*mt)[1], (long long)(*mt)[2],
+                  (long long)(*mt)[3], (long long)(*mt)[4]);
+    check(v && v->kind == oa::runtime::ValueKind::String && v->str_val == want,
           "W2 file_update_time format (yyyy/MM/dd newline hh:mm)");
-    // Missing file hook (nullopt) -> noexist default.
-    rt.interpreter().hooks().file_mtime = [](const std::string&)
-        -> std::optional<std::array<int64_t, 6>> { return std::nullopt; };
+    // 不存在的文件 -> noexist 原文。
     rt.interpreter().apply_var({{"system", "file_update_time"},
                                 {"name", "t.missing"},
                                 {"file", "save/none.dat"},
@@ -259,7 +267,7 @@ void test_text_pages_survive_save_load() {
     const auto* ml2 = rt2.text().layer("adv");
     check(ml2 && ml2->char_count == 3,
           "W17 a loaded save restores the message-layer text");
-    check(ml2 && ml2->reveal_index == 3 && !ml2->reveal_pending,
+    check(ml2 && ml2->shown == 3 && ml2->done,
           "W17 the restored page is fully revealed (not mid-typing)");
     check(ml2 && ml2->positioned && ml2->width == 1200.0,
           "W17 the restored page keeps its text box");
@@ -297,7 +305,7 @@ void test_takess_deferred_and_resize() {
     take.tag = "takess";
     rt.apply_save_event(take);
     // Capture is deferred until the host's end-of-frame hook fires.
-    rt.post_frame_capture();
+    rt.capture_screenshot();
     oa::runtime::Event shot;
     shot.kind = oa::runtime::Event::Kind::ConfigEvent;
     shot.tag = "savess";

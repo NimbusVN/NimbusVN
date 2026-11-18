@@ -4,6 +4,7 @@
 // call (calllua / (e, p) handlers / filters) passes the handle as the
 // first argument `e`.
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
@@ -76,6 +77,50 @@ assert(type(bad) == 'table' and next(bad) == nil, 'bad payload -> {}')
 bad2 = pluto.unpersist({}, 42)
 assert(type(bad2) == 'table', 'non-string -> {}')
 )", "pluto");
+}
+
+// 官方（原生引擎）pluto.persist 的二进制：包内的 system/sino.dat 就是这种
+// 形状（u32 first / u32 ref / u32 type …）。游戏侧 `getKaren()` 直接
+// `pluto.unpersist({}, e:file("system/sino.dat"))` 再 ipairs，所以这里必须
+// 读得出来——否则启动日志每次都是一条 bad magic，功能也静默失效。
+void test_pluto_official_unpersist() {
+    // 官方表：{[1]=261.0, [2]=273.0}（sino.dat 的前两项形状）
+    std::string blob;
+    const auto u32 = [&blob](uint32_t v) {
+        char b[4];
+        std::memcpy(b, &v, 4);
+        blob.append(b, 4);
+    };
+    const auto num = [&blob, &u32](uint32_t ref, double v) {
+        u32(1);
+        u32(ref);
+        u32(3);
+        char b[8];
+        std::memcpy(b, &v, 8);
+        blob.append(b, 8);
+    };
+    u32(1); // table: ref 1
+    u32(1);
+    u32(5);
+    u32(0); // persist hook = 0
+    u32(0); // 元表 nil
+    u32(0);
+    num(2, 1.0);   // key [1]
+    num(3, 261.0); // value
+    num(4, 2.0);   // key [2]
+    num(5, 273.0); // value
+    u32(0);        // 表结束
+    u32(0);
+
+    oa::runtime::LuaBridge eng(oa::runtime::LuaHost{});
+    lua_State* L = eng.state();
+    lua_pushlstring(L, blob.data(), blob.size());
+    lua_setglobal(L, "official_blob");
+    eng.run_code(
+        "local t = pluto.unpersist({}, official_blob)\n"
+        "assert(type(t) == 'table', 'official -> table')\n"
+        "assert(t[1] == 261 and t[2] == 273, 'official values survive: '..tostring(t[1]))\n",
+        "pluto_official");
 }
 
 void test_random_31bit() {
@@ -284,6 +329,7 @@ end)", "sandbox");
 int main() {
     try {
     test_pluto_roundtrip();
+    test_pluto_official_unpersist();
     test_random_31bit();
     test_sandbox_shell_surface();
     test_var_semantics();

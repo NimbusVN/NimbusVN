@@ -232,148 +232,45 @@ int main() {
     c.set_props("2", {{"visible", "1"}});
     check(c.find("2")->visible == true, "visible=1 restores");
 
-    // ---- U16 (research/32): overlay-message text visibility follows the
-    // host window tree. FPM story text ("1.80.mw.adv_adv") materializes as an
-    // engine root overlay node; when msg_hide hides the 1.80 tree (R5) or
-    // [alldelete] deletes it (image.lua lydel id=1), the text must disappear
-    // with it — a fully deleted tree previously left the text alive over the
-    // black transition page (title return / exit residue).
+    // ---- 文本可见性 = 节点可见性（旧模型：消息槽/绑定表/宿主树锚点，全删）
+    //
+    // 文本是节点内容，所以"文本可见"只有一条判据：节点在、自身可见、祖先链
+    // 可见。下面是这条规则的边界情形。
     {
         oa::render::Compositor sc;
         sc.create("1", {});
         sc.create("1.80", {});
         sc.create("1.80.mw", {});
-        // M7: layered=0 消息的槽节点由引擎显式分配(结构标记 + 槽区,无 hex
-        // 编码,id 不随消息 id 变);测试以真实消息槽为绑定目标。
-        const std::string slot =
-            sc.ensure_message_scene_node("1.80.mw.adv_adv", false);
-        check(slot != "1.80.mw.adv_adv" && sc.is_message_slot(slot) &&
-                  sc.find(slot) != nullptr,
-              "M7 story message got an engine message slot");
-        check(sc.ensure_message_scene_node("1.80.mw.adv_adv", false) == slot,
-              "M7 slot reused for the same message (not content-derived)");
-        sc.set_message_layer_binding("1.80.mw.adv_adv", slot);
-        check(sc.is_message_layer_visible("1.80.mw.adv_adv"),
-              "U16 overlay text visible while the host window tree lives");
+        sc.create("1.80.mw.adv", {}); // 文本的宿主就是它自己的节点
+        check(sc.is_message_layer_drawable("1.80.mw.adv", true),
+              "text visible while its node lives");
         sc.set_props("1.80", {{"visible", "0"}});
-        check(!sc.is_message_layer_visible("1.80.mw.adv_adv"),
-              "U16 (R5) overlay text hidden when the host tree is hidden");
+        check(!sc.is_message_layer_drawable("1.80.mw.adv", true),
+              "hidden ancestor hides the text");
         sc.set_props("1.80", {{"visible", "1"}});
-        sc.remove("1"); // [alldelete] lydel-style: whole host tree dies
-        check(!sc.is_message_layer_visible("1.80.mw.adv_adv"),
-              "U16 overlay text dies when the host window tree is deleted");
-        // a root-level engine-only overlay (single segment, no host tree)
-        // keeps its own visibility semantics
+        sc.remove("1"); // [alldelete]：整棵宿主树没了
+        check(!sc.is_message_layer_drawable("1.80.mw.adv", true),
+              "deleted host tree takes the text with it");
+
+        // 单段 id（引擎自管 overlay，没有宿主树概念）：自己说了算。
         sc.create("znotify", {});
-        check(sc.is_message_layer_visible("znotify"),
-              "U16 single-segment engine overlay unaffected");
+        check(sc.is_message_layer_drawable("znotify", true),
+              "single-segment overlay follows its own visibility");
         sc.set_props("znotify", {{"visible", "0"}});
-        check(!sc.is_message_layer_visible("znotify"),
-              "U16 single-segment overlay hidden by its own visibility");
-        // ---- M4 (research/33): converged rule surface pins — semantics
-        // identical to the pre-M4 code (pure refactor); these asserts spell
-        // out the explicit rule the duplicated ancestor-chain lambdas
-        // collapsed into (host_tree_anchor_visible).
-        // remove("1") cleared the binding but the slot itself stays in the
-        // message-slot area; rebinding revives it: the slot node is alive and
-        // visible, yet the host tree is gone -> overlay text stays dead.
-        sc.set_message_layer_binding("1.80.mw.adv_adv", slot);
-        check(sc.find(slot) != nullptr,
-              "M4 message slot node itself still exists");
-        check(!sc.is_message_layer_visible("1.80.mw.adv_adv"),
-              "M4 slot node alive but host tree gone -> invisible");
-        // Host tree re-created: the nearest live anchor decides again.
-        sc.create("1", {});
-        sc.create("1.80", {});
-        sc.create("1.80.mw", {});
-        check(sc.is_message_layer_visible("1.80.mw.adv_adv"),
-              "M4 host tree re-created -> overlay text visible again");
-        sc.set_props("1.80.mw", {{"visible", "0"}});
-        check(!sc.is_message_layer_visible("1.80.mw.adv_adv"),
-              "M4 nearest live host anchor hidden -> invisible");
-        sc.set_props("1.80.mw", {{"visible", "1"}});
-        sc.remove("1");
-        check(!sc.is_message_layer_visible("1.80.mw.adv_adv"),
-              "M4 host tree deleted again -> invisible");
-        // Layered identity (bound scene target == message id): the node's own
-        // effective visibility decides, no host-tree anchoring involved.
-        sc.create("9.9.adv", {});
-        sc.set_message_layer_binding("9.9.adv", "9.9.adv");
-        check(sc.is_message_layer_visible("9.9.adv"),
-              "M4 layered identity node visible -> visible");
-        sc.set_props("9.9", {{"visible", "0"}});
-        check(!sc.is_message_layer_visible("9.9.adv"),
-              "M4 layered identity node under a hidden ancestor -> invisible");
-        sc.set_props("9.9", {{"visible", "1"}});
-        sc.remove("9");
-        check(!sc.is_message_layer_visible("9.9.adv"),
-              "M4 layered binding dropped with its subtree -> invisible");
-        // ---- M7: 槽区输出 = 场景区之后按创建序(无 message-last 拼写分支)。
-        const std::string slot2 = sc.ensure_message_scene_node("m2", false);
-        check(sc.is_message_slot(slot2) && slot2 != slot,
-              "M7 second message gets its own slot");
-        const auto order7 = sc.draw_order();
-        check(order7.size() >= 2 &&
-                  order7[order7.size() - 2]->id == slot &&
-                  order7[order7.size() - 1]->id == slot2,
-              "M7 slots sit at the draw tail in creation order");
-        sc.remove(slot2);
-        check(!sc.find(slot2) && sc.draw_order().back()->id == slot,
-              "M7 removing a slot detaches it from the slot area");
-    }
-    // ---- 孤儿消息绘制门槛 (research/63): is_message_layer_drawable ——
-    // 有效可见之外还要求"绘制盒":文本层 [font] 排版键配置过 或 绑定节点被
-    // 脚本显式创建/改写(script_created)。既无盒、节点又只是 chgmsg 绑定
-    // ensure_path 自动物化的孤儿打印(游戏数据残留的未挂载 ui_message 数值
-    // 打印)不绘制 —— 场景从未给它位置,绘制只会落在继承来的外来几何上。
-    {
-        oa::render::Compositor sc;
-        sc.create("500", {}); // authored UI group (NekoMiko config 500)
-        const std::string node =
-            sc.ensure_message_scene_node("500.p03", true); // chgmsg materializes
-        check(node == "500.p03" && sc.find(node) != nullptr,
-              "63 orphan layered message node auto-materialized (not authored)");
-        check(sc.find(node) && !sc.find(node)->script_created,
-              "63 auto-materialized node is NOT script_created");
-        check(!sc.is_message_layer_drawable("500.p03", false),
-              "63 unboxed orphan text not drawable");
-        check(sc.is_message_layer_visible("500.p03"),
-              "63 orphan stays registry-visible (scene semantics unchanged)");
-        check(sc.is_message_layer_drawable("500.p03", true),
-              "63 text box ([font] layout keys) makes it drawable");
-        // research/71 (user-corrected rule, supersedes 63's lyprop anchor):
-        // [lyprop] on a binding-materialized node does NOT give unboxed text
-        // a paint seat — snll config uihelp hover tips (500.z.help) print
-        // with no [font] row; the uihelp_over lyprop only anchors/centers the
-        // overlay, so the tip must not draw (FPM's boxed uihelp keeps
-        // drawing). Only [lyc]/[lyc2] creation authors a node.
-        sc.set_props("500.p03", {{"visible", "1"}});
-        check(sc.find("500.p03") && !sc.find("500.p03")->script_created,
-              "71 lyprop does NOT author the materialized node");
-        check(!sc.is_message_layer_drawable("500.p03", false),
-              "71 unboxed text on an lyprop-only node is NOT drawable");
-        sc.create("500.p03", {}); // [lyc2]-style authored node
-        check(sc.find("500.p03") && sc.find("500.p03")->script_created,
-              "71 lyc2-created node is script_created");
+        check(!sc.is_message_layer_drawable("znotify", true),
+              "single-segment overlay can hide itself");
+
+        // 有绘制盒（[font] 排过版）按盒画；没有盒时，只有脚本显式创建的
+        // 节点才算宿主（孤儿打印不画）。
+        sc.create("500", {});
+        sc.create("500.p03", {});
         check(sc.is_message_layer_drawable("500.p03", false),
-              "71 created (authored) node makes the message drawable");
-        // 隐藏祖先仍然压过一切。
+              "script-authored node carries unboxed text");
+        check(sc.is_message_layer_drawable("500.p03", true),
+              "text box also makes it drawable");
         sc.set_props("500", {{"visible", "0"}});
         check(!sc.is_message_layer_drawable("500.p03", true),
-              "63 hidden authored ancestor still blocks drawing");
-        sc.set_props("500", {{"visible", "1"}});
-        // layered=0 槽消息:槽节点从不 script_created → 只靠文本盒。
-        sc.create("1.80", {});
-        sc.create("1.80.mw", {});
-        const std::string slot =
-            sc.ensure_message_scene_node("1.80.mw.adv", false);
-        sc.set_message_layer_binding("1.80.mw.adv", slot);
-        check(sc.is_message_layer_visible("1.80.mw.adv"),
-              "63 slot message visible through the host tree anchor");
-        check(!sc.is_message_layer_drawable("1.80.mw.adv", false),
-              "63 unboxed slot message not drawable");
-        check(sc.is_message_layer_drawable("1.80.mw.adv", true),
-              "63 boxed slot message drawable");
+              "hidden ancestor still wins over a text box");
     }
     // ---- layer-video 绑定物化门槛 (research/73;layer-model S5 起入口 =
     // bind_video_layer):只对系统覆盖区 ("500." id 族,标题花瓣 500.z.mv 的

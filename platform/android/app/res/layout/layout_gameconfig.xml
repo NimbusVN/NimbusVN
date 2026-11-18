@@ -26,45 +26,10 @@
         android:layout_marginBottom="12dp"
         android:background="@color/text_muted" />
 
-    <!-- 渲染器选择 -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="渲染器"
-        android:textColor="@color/text_secondary"
-        android:textSize="12sp" />
-
-    <RadioGroup
-        android:id="@+id/group_renderer"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:orientation="horizontal">
-
-        <RadioButton
-            android:id="@+id/button_render_software"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="软件渲染 (software)"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
-
-        <RadioButton
-            android:id="@+id/button_render_gl"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="20dp"
-            android:text="硬件渲染 (gl)"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
-    </RadioGroup>
-
     <!-- 平台段选择：决定 system.ini 走哪个 OS 段（[android] / [windows]） -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
         android:text="平台"
         android:textColor="@color/text_secondary"
         android:textSize="12sp" />
@@ -94,6 +59,47 @@
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
     </RadioGroup>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="12dp"
+        android:background="@color/bg_card" />
+
+    <!-- 游戏目录扫描：递归深度 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="游戏目录扫描"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/text_scandepth"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="递归深度：1 层（只扫所选目录的直接子目录）"
+        android:textColor="@color/text_primary"
+        android:textSize="13sp" />
+
+    <SeekBar
+        android:id="@+id/seek_scandepth"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:max="5"
+        android:progress="0"
+        android:progressTint="@color/secondary"
+        android:thumbTint="@color/secondary" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="调到 2 层以上时，选 data 也能扫出 data/krkr、data/artemis。下钻时只把带 xp3 / pfs / system.ini 的目录当成游戏，纯文件夹会继续往下找。"
+        android:textColor="@color/text_muted"
+        android:textSize="11sp" />
 
     <View
         android:layout_width="match_parent"

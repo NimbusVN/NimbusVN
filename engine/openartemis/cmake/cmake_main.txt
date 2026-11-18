@@ -45,6 +45,14 @@ set(OA_TEST_T13_PFS "" CACHE FILEPATH "Path to the test13 (Aiyoku no Eustia) roo
 if(NOT OA_TEST_T13_PFS AND DEFINED ENV{OA_TEST_T13_PFS})
     set(OA_TEST_T13_PFS "$ENV{OA_TEST_T13_PFS}" CACHE FILEPATH "" FORCE)
 endif()
+set(OA_BT91_PFS "" CACHE FILEPATH "Path to the BT91 (test4) root.pfs (or set the OA_BT91_PFS env var at configure time)")
+if(NOT OA_BT91_PFS AND DEFINED ENV{OA_BT91_PFS})
+    set(OA_BT91_PFS "$ENV{OA_BT91_PFS}" CACHE FILEPATH "" FORCE)
+endif()
+set(OA_TEST_HCT_PFS "" CACHE FILEPATH "Path to the HCT (test16) root.pfs (or set the OA_TEST_HCT_PFS env var at configure time)")
+if(NOT OA_TEST_HCT_PFS AND DEFINED ENV{OA_TEST_HCT_PFS})
+    set(OA_TEST_HCT_PFS "$ENV{OA_TEST_HCT_PFS}" CACHE FILEPATH "" FORCE)
+endif()
 
 # ---------------------------------------------------------------------------
 # ASan：只插桩 openartemis 自己的 TU（vcpkg 依赖保持原样）。

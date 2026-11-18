@@ -32,8 +32,12 @@ openartemis [options] [project.pfs]     # pfs 或解包目录（含 system.ini�
 ```
 
 窗口模式 Esc / 关窗 / 游戏自身 exit 退出；存档根默认 = 游戏数据所在目录
-（可用 `OA_SAVE_ROOT` 覆盖）。离屏/无人值守跑一律加 `--mute`：设备、解码、
-混音队列照旧，只把主音量置 0。
+（可用 `OA_SAVE_ROOT` 覆盖）。
+
+离屏/无人值守跑一律加 `--mute`：**不初始化 SDL 音频、不打开设备**。没有
+sink，通道混音和影片自带音轨都无处可去，扬声器上不可能出声（以前只是把
+主音量置 0，而视频音频走自己的设备流、不经过通道混音器，会漏出来）。解码
+与完成事件照常跑，状态机不受影响。
 
 ---
 
@@ -44,25 +48,47 @@ openartemis [options] [project.pfs]     # pfs 或解包目录（含 system.ini�
   media_state / media_runtime / video_decode / video_mask / decode_pool /
   save_domain / save_compat / save_thumb_readback / p1c2_control /
   backlog_var_bridge / misc_b / emote_track_sample / emote_warp 等。
-- `tests/fpm/` — **真实游戏回归**（缺包时自跳 exit 77）。只依赖 **4 个包**：
-  `OA_TEST_FPM_PFS`（ハミダシクリエイティブ 中文版，UI/剧情/文本主包）、
-  `OA_TEST_NEKOMIKO_PFS`（NekoMiko，emote / wmv / 字体）、
-  `OA_TEST_RR_PFS`（常轨脱离ReReCall，影片音频：OP 引擎级 + 启动链 +
-  driver idle-gap + 音频 bound/EOF flush）、
-  `OA_TEST_TG3_PFS`（甜蜜女友3，timeline 手势/循环语义）。
-- 全量：`ctest --test-dir out/windows -C Release`（**69 项**；真包测试需按
-  上文准备，缺包只是 skip 不是 fail）。
+- `tests/fpm/` — **真实游戏游程**（缺包时自跳 exit 77）。**一个游戏一个文件**：
+  `game_<game>_test.cpp`。没有“通用游程”文件 —— 启动形状（标题 → 语言选择
+  → 开场 → 角色选择 → 正文）每个游戏都不一样，属于它自己的文件；同一个游戏
+  要加流程就在该文件里加一个 `case_*`，共用同一个 `boot()`。
+  公共设施只有两个：
+  - `test_host.h` — **核心测试包装类**：把 `main.cpp` 的初始化全包掉
+    （SDL/隐藏窗口/真后端/静音/固定步长/临时存档目录；静音 = **不打开音频
+    设备**，连视频自带音轨也无处输出），事件走
+    `App::mouse_*` / `App::key_event`（和窗口模式同一条路径），并提供
+    `plan()`（渲染队列：id/世界矩形/透明度/是否文字项）、`shot()`/`save_png()`、
+    `click_key()`/`has_button()`/`click_text()`/`wait_for()` 等判定能力。
+  - `crash_backtrace.{h,cpp}` — 崩溃时打印 `[crash] #NN +0x偏移`，配
+    `addr2line` 直接定位到源码行。
 
-包路径在 configure 期用 `-D` 或环境变量给（cache 优先于 env）；两个都没给时
-相关测试自跳。例：
+  8 个包（变量名里的缩写是发行包标识，不是游戏名）：
+
+  | 变量 | 游戏 |
+  |---|---|
+  | `OA_TEST_NEKOMIKO_PFS` | NekoMiko（qureate） |
+  | `OA_TEST_FPM_PFS` | ハミダシクリエイティブ（中文版） |
+  | `OA_TEST_TG3_PFS` | 甜蜜女友3 |
+  | `OA_BT91_PFS` | ヘンタイ・プリズン |
+  | `OA_TEST_T5_PFS` | 乙女理論とその周辺 -Ecole de Paris- |
+  | `OA_TEST_T13_PFS` | 穢翼のユースティア |
+  | `OA_TEST_HCT_PFS` | ハミダシクリエイティブ凸 |
+  | `OA_TEST_RR_PFS` | 常轨脱离ReReCall |
+
+包路径在 configure 期用 `-D` 或环境变量给（cache 优先于 env）；两边都没给时
+相关测试自跳（exit 77）。例：
 
 ```sh
 # Windows 为例；Linux/macOS 换成对应预设
 cmake --preset "Windows Config" -DOA_ENABLE_TESTS=ON \
   -DOA_TEST_FPM_PFS=/games/fpm/root.pfs \
   -DOA_TEST_NEKOMIKO_PFS=/games/nm/root.pfs \
-  -DOA_TEST_RR_PFS=/games/rr/root.pfs \
-  -DOA_TEST_TG3_PFS=/games/tg3/root.pfs
+  -DOA_TEST_TG3_PFS=/games/tg3/root.pfs \
+  -DOA_BT91_PFS=/games/bt91/root.pfs \
+  -DOA_TEST_T5_PFS=/games/t5/root.pfs \
+  -DOA_TEST_T13_PFS=/games/t13/root.pfs \
+  -DOA_TEST_HCT_PFS=/games/hct/root.pfs \
+  -DOA_TEST_RR_PFS=/games/rr/root.pfs
 cmake --build --preset "Windows Release Build"
 ```
 
@@ -82,10 +108,14 @@ cmake --build --preset "Windows Release Build"
 
 | 变量 | 作用 |
 |---|---|
-| `OA_TEST_FPM_PFS` | 主回归包路径（ハミダシクリエイティブ 中文版）。`tests/fpm/` 大多数测试与部分通用测试（asb/ini/script/video_decode 等）靠它工作 |
-| `OA_TEST_NEKOMIKO_PFS` | NekoMiko 包：`nekomiko_p0` / `emote_static` / `emote_chain` / `emote_playback` / `font_face` / `wmv_decode` |
-| `OA_TEST_RR_PFS` | 影片音频包：`rr_movie_audio` / `tm_movie_gap` / `movie_audio_bound` |
-| `OA_TEST_TG3_PFS` | E-mote timeline 包：`emote_timeline` |
+| `OA_TEST_FPM_PFS` | ハミダシクリエイティブ（中文版）包路径；`game_fpm_test` 与少量通用测试（asb/ini/script/video_decode 等）靠它工作 |
+| `OA_TEST_NEKOMIKO_PFS` | NekoMiko：`game_nekomiko_test` |
+| `OA_TEST_TG3_PFS` | 甜蜜女友3：`game_tg3_test` |
+| `OA_BT91_PFS` | ヘンタイ・プリズン：`game_bt91_test` |
+| `OA_TEST_T5_PFS` | 乙女理論とその周辺 -Ecole de Paris-：`game_t5_test` |
+| `OA_TEST_T13_PFS` | 穢翼のユースティア：`game_t13_test` |
+| `OA_TEST_HCT_PFS` | ハミダシクリエイティブ凸：`game_hct_test` |
+| `OA_TEST_RR_PFS` | 常轨脱离ReReCall：`game_rr_test` |
 
 ### C. 引擎诊断（core 内 env 门控，不设即零开销零输出）
 
@@ -93,34 +123,26 @@ cmake --build --preset "Windows Release Build"
 |---|---|---|
 | `OA_SCENEDUMP` | 按 id 前缀转储场景节点（`id left top w h vis alpha eff file`），`""` = 全部。核对"某层到底在不在/位置对不对" | `core/runtime/runtime.cpp` |
 | `OA_VARDUMP` | 结束前按前缀导出引擎变量表（local/temp/global/system），`""` = 全部 | 同上 |
-| `OA_TXTDUMP` | 转储每个消息层（`chars/reveal/pending/hidden/positioned/page/alpha/vis/box/size/align/sample`）。区分"文本没派发进来"（全层 `chars=0`）与"进了错的层/没定位" | 同上 |
+| `OA_TXTDUMP` | 转储每个消息层（`chars/shown/done/hidden/positioned/page/alpha/vis/box/size/align/sample`）。区分"文本没派发进来"（全层 `chars=0`）与"进了错的层/没定位" | 同上 |
 | `OA_PLAN_REUSE` | 帧计划复用开关（默认开）。计划按"层容器版本 + 文本版本 + 全局淡出 + stage 尺寸"缓存；宿主供帧不失效计划。`=0` 强制每帧重建，用于定位"复用门漏失效信号"（A/B：同帧开/关比像素与 `[scene]`） | `core/render/renderer.cpp` |
+| `OA_STACKDBG` | 每次 `e:getScriptStack()` 打一行 `[stack] file@line …`（事件处理帧显示为空文件名）。核对"框架看到的栈"与"引擎真实的栈"是否一致——UI 会话/backlog 关闭路径的落点全靠这一层 | `core/runtime/runtime_iet.cpp` |
+| `OA_PARKDBG` | 每次武装停驻打一行 `[park] arm <owner>:<line> (now …) stage/click/timed/owned/wakes`。定位"这一页到底停在谁身上、被哪个 wake 放行" | `core/runtime/runtime.cpp` |
 
-### D. 探针 / 工具的旋钮（非 ctest，report-only）
+### D. 游程排查开关（非 ctest，report-only）
 
-这些只被对应探针/工具读取，**不进 ctest**；每个文件头部注释就是它的完整文档：
+只在排查某个游戏的启动/推进时用，正常跑不设：
 
-| 变量族 | 归属 |
+| 变量 | 作用 |
 |---|---|
-| `OA_BT91_*`（`PAGES` / `PRE` / `KEY` / `LOAD` / `LUABLOG` / `F8TICKS` / `SAVE` / `PFS` / `NOF8` / `DBGKEYS` / `LUABLOG_IMMED`） | `tests/fpm/bt91_backlog_face_probe.cpp`（backlog 行头像几何/世界 AABB） |
-| `OA_SELDEEP` / `OA_P2DEEP` / `OA_P2TRACE` / `OA_SELBACK*` / `OA_SELDBL*` / `OA_LOG_ALL_PAGES` / `OA_DUMP_EMOTE_PAGE` / `OA_DUMP_EMOTE_LATE` / `OA_TEST_STORE_DIR` | `tests/fpm/nekomiko_p0_test.cpp`（深跑/选择支/表情帧导出） |
-| `OA_PERF_DUMP` | `tests/fpm/emote_perf_probe.cpp` |
-| `OA_MEM_NOPUMP` / `OA_MEM_GPU` | `tests/fpm/mem_churn_probe.cpp` |
-| `OA_VPROBE_FRAMES` | `tests/fpm/video_perf_probe.cpp` |
-| `OA_ES_PAGES` / `OA_ES_SAVE` | `tests/fpm/emote_state_probe.cpp` |
-| `OA_SO_PAGES` / `OA_SO_LOAD` / `OA_SO_SAVEDIR` / `OA_TEST_SO_PFS` | `tests/fpm/so90_face_probe.cpp` |
-| `OA_HCT_PROBE_*` / `OA_TEST_HCT_PFS` | `tests/fpm/hct_journey_probe.cpp` |
-| `OA_SN101_CLICKDURING` / `OA_SN101_SAVESRC` / `OA_TEST_SNLL_PFS` | `tests/fpm/sn101_montage_probe.cpp` |
-| `OA_SAKURA_PROBE_*` | `tests/fpm/sakura_mask_probe.cpp` |
-| `OA_LAT_ARM` / `OA_LAT_LOAD` / `OA_LAT_RUNS` / `OA_LAT_SEED` | `tests/fpm/audio_latency_dist_probe.cpp` |
-| `OA_AM_PROBE_PAGES` | `tests/fpm/automode_probe.cpp` |
-| `OA_WMV_DUMP` | `tests/fpm/wmv_decode_test.cpp` |
-| `OA_FRAMES` / `OA_SAMPLE_ALL` / `OA_SAMPLE_LEGACY` | `tools/psb.cpp` |
-| `OA_UX_TRACE` | `tests/fpm/ux_journey_test.cpp` |
-| `OA_TEST_OFFICIAL_SAVE_DIR` | `tests/official_save_test.cpp` |
+| `OA_JOURNEY_TRACE` | 每若干帧打印当前页文本、停驻/可点状态、可点层（`com=/def=/key=` + 世界矩形）、渲染队列项。启动流程对不上时先看这里，不要猜按钮 |
+| `OA_JOURNEY_UI_KEY` | 指定 `case_ui_toggle` 点哪个按钮（默认按游戏自己的 `def`/`com`，如 `load`） |
+| `OA_JOURNEY_LOAD_KEY` | NekoMiko 存读档用例里"读档"按钮名 |
+| `OA_JOURNEY_LIST` | NekoMiko：只列出当前屏的可点按钮后退出 |
+| `OA_JOURNEY_SHOT` | NekoMiko：把该帧落成 PNG 的目录（`test_host::save_png`） |
+| `OA_JOURNEY_NO_RENDER` | NekoMiko：不接渲染器（纯数据二分，用来判断问题在数据层还是绘制层） |
 
-> `OA_TEST_FPM_PFS` 也被少量通用测试的 CMake 条目注入（asb/ini/script/
-> video_decode 等）——它们确实读这个变量，不再是历史遗留。
+> `OA_FRAMES` / `OA_SAMPLE_ALL` / `OA_SAMPLE_LEGACY` 仍属 `tools/psb.cpp`；
+> `OA_TEST_OFFICIAL_SAVE_DIR` 属 `tests/official_save_test.cpp`。
 
 ---
 
@@ -129,7 +151,7 @@ cmake --build --preset "Windows Release Build"
 ```sh
 cmake --preset "Windows Config" -DOA_ENABLE_TESTS=ON
 cmake --build --preset "Windows Release Build"
-ctest --test-dir out/windows -C Release          # 69 项
+ctest --test-dir out/windows -C Release          # 41 项
 
 # app 冒烟（离屏 + 一帧 PPM）
 OA_SAVE_ROOT=/tmp/s ./out/windows/Release/openartemis.exe \

@@ -31,6 +31,7 @@ set(KRKRSDL_PLUGINS_SRC
     ${KRKRSDL_PLUGINS_PATH}/shrinkCopy.cpp
     ${KRKRSDL_PLUGINS_PATH}/textrender.cpp
     ${KRKRSDL_PLUGINS_PATH}/TVPPlugin.cpp
+    ${KRKRSDL_PLUGINS_PATH}/util_generic.cpp
     ${KRKRSDL_PLUGINS_PATH}/varfile.cpp
     ${KRKRSDL_PLUGINS_PATH}/win32dialog.cpp
     ${KRKRSDL_PLUGINS_PATH}/windowEx.cpp
@@ -55,6 +56,8 @@ set(KRKRSDL_PLUGINS_SRC
     ${KRKRSDL_PLUGINS_PATH}/extrans/wave.cpp
     ${KRKRSDL_PLUGINS_PATH}/KAGParserEx/KAG.cpp
     ${KRKRSDL_PLUGINS_PATH}/KAGParserEx/KAGParserEx.cpp
+    ${KRKRSDL_PLUGINS_PATH}/KAGParserExb/KAG.cpp
+    ${KRKRSDL_PLUGINS_PATH}/KAGParserExb/KAGParserExb.cpp
 	${KRKRSDL_PLUGINS_PATH}/ExtKAGParser/ExtKAG.cpp
     ${KRKRSDL_PLUGINS_PATH}/ExtKAGParser/ExtKAGParser.cpp
 	${KRKRSDL_PLUGINS_PATH}/ExtKAGParser/TJSAry.cpp

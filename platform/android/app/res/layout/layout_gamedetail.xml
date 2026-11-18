@@ -193,47 +193,6 @@
             android:contentDescription="浏览启动文件" />
     </LinearLayout>
 
-    <!-- 单人渲染器选择 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="渲染器:"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <RadioGroup
-            android:id="@+id/detail_renderer_group"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="8dp"
-            android:orientation="horizontal">
-
-            <RadioButton
-                android:id="@+id/detail_render_software"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="software"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-
-            <RadioButton
-                android:id="@+id/detail_render_gl"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginLeft="12dp"
-                android:text="gl"
-                android:textColor="@color/text_secondary"
-                android:textSize="12sp" />
-        </RadioGroup>
-    </LinearLayout>
-
     <!-- 内核选择：自动识别 / krkrsdl3 (XP3) / openartemis (PFS) -->
     <LinearLayout
         android:layout_width="match_parent"

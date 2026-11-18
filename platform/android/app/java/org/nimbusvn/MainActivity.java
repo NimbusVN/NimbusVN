@@ -23,6 +23,7 @@ import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.BaseAdapter;
@@ -38,6 +39,7 @@ import android.widget.ListView;
 import android.widget.PopupWindow;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -58,6 +60,7 @@ import java.io.File;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -80,6 +83,17 @@ public class MainActivity extends AppCompatActivity {
     public static final String SHAREDPREF_NAME = "krkrsdl";
     public static final String SHAREDPREF_GAMEDIR = "gamedir";
     private static final String PREF_GAMEARGS = "gameargs";
+
+    /**
+     * 游戏目录扫描深度（存在 gameargs JSON 的 "scandepth" 里）。
+     * 1 层 = 只看所选目录的直接子目录（历史行为）；
+     * N 层 = 遇到"总目录"（里面没有游戏标志文件）就继续往下钻，最多 N 层。
+     */
+    private static final String PREF_SCANDEPTH = "scandepth";
+    private static final int SCAN_DEPTH_MIN = 1;
+    private static final int SCAN_DEPTH_MAX = 6;
+    /** 保险丝：一次扫描最多访问多少个目录，防止把整个 SD 卡拖死。 */
+    private static final int SCAN_DIR_LIMIT = 2000;
 
     private enum DIR_TYPE {
         NOT_DIR, NORMAL_DIR, SAF_DIR
@@ -792,13 +806,23 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout m_tagFilterContainer;
     private String m_activeFilterTag; // null = 显示全部
 
+    // 搜索（游戏名 / 路径 / 标签）
+    private EditText m_textSearch;
+    private ImageButton m_buttonSearchClear;
+    private String m_searchQuery = "";
+
     // 当前详情中正在编辑的游戏（用于启动文件选择）
     private GameInfo m_currentDetailGame;
+
+    // 当前这一轮目录扫描已经访问过的目录数（配合 SCAN_DIR_LIMIT 用）
+    private int m_scanVisited;
 
         /**
      * 判断游戏是否匹配当前标签筛选
      */
     private boolean isGameVisible(GameInfo gi) {
+        if (gi == null) return false;
+        if (!matchesSearchQuery(gi)) return false;
         if (m_activeFilterTag == null || m_activeFilterTag.isEmpty()) return true;
         String tags = getGameTags(gi.m_path);
         if (tags.isEmpty()) return false;
@@ -814,7 +838,7 @@ public class MainActivity extends AppCompatActivity {
      */
     private int getVisibleGameCount() {
         if (m_gamelist == null) return 0;
-        if (m_activeFilterTag == null || m_activeFilterTag.isEmpty()) return m_gamelist.size();
+        if (!hasActiveGameFilter()) return m_gamelist.size();
         int count = 0;
         for (GameInfo gi : m_gamelist) {
             if (isGameVisible(gi)) count++;
@@ -826,7 +850,7 @@ public class MainActivity extends AppCompatActivity {
      * 获取第 position 个可见游戏的原始索引
      */
     private int getVisiblePosition(int position) {
-        if (m_activeFilterTag == null || m_activeFilterTag.isEmpty()) return position;
+        if (!hasActiveGameFilter()) return position;
         int idx = 0;
         for (int i = 0; i < m_gamelist.size(); i++) {
             if (isGameVisible(m_gamelist.get(i))) {
@@ -900,6 +924,7 @@ public class MainActivity extends AppCompatActivity {
         initUiTabs();   // 注册点击事件，但不选默认标签（下方根据历史决定）
         initUiGameConfig();
         initUiGameDir();
+        initUiSearch();
         initUiHistory();
         updateGamelist();
         refreshHistory();
@@ -1064,6 +1089,8 @@ public class MainActivity extends AppCompatActivity {
             setupConfigListener(layout_config.getChildAt(i));
         }
 
+        initUiScanDepth();
+
         Button button_checkupdate = findViewById(R.id.button_checkupdate);
         button_checkupdate.setOnClickListener(view -> {
             Intent intent = new Intent();
@@ -1103,6 +1130,71 @@ public class MainActivity extends AppCompatActivity {
         } else if (v instanceof RadioGroup) {
             ((RadioGroup) v).setOnCheckedChangeListener((group, checkedId) -> updateGameConfig(false));
         }
+    }
+
+    // ========== 目录扫描深度 ==========
+
+    /**
+     * 设置面板里的「递归深度」滑条：1~6 层。
+     * 拖动时只改提示文字，松手才落盘并重新扫描，避免一路拖过去扫十几遍。
+     */
+    private void initUiScanDepth() {
+        SeekBar seek = findViewById(R.id.seek_scandepth);
+        if (seek == null) return;
+
+        seek.setMax(SCAN_DEPTH_MAX - SCAN_DEPTH_MIN);
+        seek.setProgress(getScanDepth() - SCAN_DEPTH_MIN);
+        updateScanDepthLabel(getScanDepth());
+
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) updateScanDepthLabel(progress + SCAN_DEPTH_MIN);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                applyScanDepth(seekBar.getProgress() + SCAN_DEPTH_MIN);
+            }
+        });
+    }
+
+    private void updateScanDepthLabel(int depth) {
+        TextView label = findViewById(R.id.text_scandepth);
+        if (label == null) return;
+        if (depth <= 1) {
+            label.setText("递归深度：1 层（只扫所选目录的直接子目录）");
+        } else {
+            label.setText("递归深度：" + depth + " 层（最多往下找 " + depth + " 层）");
+        }
+    }
+
+    /** 保存新的扫描深度并立刻重扫游戏目录。 */
+    private void applyScanDepth(int depth) {
+        if (depth < SCAN_DEPTH_MIN) depth = SCAN_DEPTH_MIN;
+        if (depth > SCAN_DEPTH_MAX) depth = SCAN_DEPTH_MAX;
+        updateScanDepthLabel(depth);
+
+        if (depth == getScanDepth()) return;
+
+        try {
+            if (m_gameargs == null) m_gameargs = new JSONObject();
+            m_gameargs.put(PREF_SCANDEPTH, depth);
+            m_sharedpref.edit().putString(PREF_GAMEARGS, m_gameargs.toString()).apply();
+        } catch (JSONException e) {
+            Log.e("## krkrsdl3_android", e.toString());
+        }
+
+        if (m_gamedir == null || m_gamedir.trim().isEmpty()) return;
+        if (checkDir(m_gamedir) == DIR_TYPE.NOT_DIR) return;
+
+        updateGamelist();
+        Toast.makeText(this,
+                "已改为 " + depth + " 层，扫到 " + m_gamelist.size() + " 个游戏目录",
+                Toast.LENGTH_SHORT).show();
     }
 
     // ========== 游戏目录 ==========
@@ -1214,39 +1306,242 @@ public class MainActivity extends AppCompatActivity {
 
     // ========== 游戏列表管理 ==========
 
+    // ========== 搜索 ==========
+
+    private void initUiSearch() {
+        m_textSearch = findViewById(R.id.text_search);
+        m_buttonSearchClear = findViewById(R.id.button_search_clear);
+        if (m_textSearch == null) return;
+
+        m_textSearch.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                final String q = s.toString().trim();
+                if (q.equals(m_searchQuery)) return;
+                m_searchQuery = q;
+                if (m_buttonSearchClear != null) {
+                    m_buttonSearchClear.setVisibility(q.isEmpty() ? View.GONE : View.VISIBLE);
+                }
+                // 只刷列表，不重建标签栏：每敲一个字重建会闪，也会吞掉输入焦点
+                notifyDataChanged();
+                updateLibraryEmptyState();
+            }
+        });
+        m_textSearch.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                InputMethodManager imm =
+                        (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (imm != null) imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+                return true;
+            }
+            return false;
+        });
+        if (m_buttonSearchClear != null) {
+            m_buttonSearchClear.setOnClickListener(v -> {
+                if (m_textSearch != null) m_textSearch.setText("");
+            });
+        }
+    }
+
+    /** 是否有任何筛选（标签或搜索）——决定列表要不要走逐项过滤。 */
+    private boolean hasActiveGameFilter() {
+        boolean tag = m_activeFilterTag != null && !m_activeFilterTag.isEmpty();
+        boolean search = m_searchQuery != null && !m_searchQuery.isEmpty();
+        return tag || search;
+    }
+
+    /**
+     * 搜索匹配：游戏名 / 路径 / 标签，全部转小写做子串匹配。
+     * 空格分隔的多个词要求**全部命中**（"neko 汉化" 这种组合很好用）。
+     */
+    private boolean matchesSearchQuery(GameInfo gi) {
+        if (m_searchQuery == null || m_searchQuery.isEmpty()) return true;
+        final String name = gi.m_name != null ? gi.m_name : "";
+        final String path = gi.getRealPath() != null ? gi.getRealPath() : "";
+        final String tags = getGameTags(gi.m_path);
+        final String haystack = (name + "\n" + path + "\n" + tags).toLowerCase(Locale.ROOT);
+        for (String token : m_searchQuery.toLowerCase(Locale.ROOT).split("\\s+")) {
+            if (token.isEmpty()) continue;
+            if (!haystack.contains(token)) return false;
+        }
+        return true;
+    }
+
+    /** 空列表提示：区分"没有游戏""没有这个标签""搜索无结果"。 */
+    private void updateLibraryEmptyState() {
+        if (m_textEmptyLibrary == null) return;
+        if (getVisibleGameCount() > 0) {
+            m_textEmptyLibrary.setVisibility(View.GONE);
+            return;
+        }
+        m_textEmptyLibrary.setVisibility(View.VISIBLE);
+        final boolean hasSearch = m_searchQuery != null && !m_searchQuery.isEmpty();
+        final boolean hasTag = m_activeFilterTag != null && !m_activeFilterTag.isEmpty();
+        if (m_gamelist == null || m_gamelist.isEmpty()) {
+            m_textEmptyLibrary.setText("没有游戏\n在顶部输入游戏目录路径");
+        } else if (hasSearch) {
+            m_textEmptyLibrary.setText("没有匹配「" + m_searchQuery + "」的游戏");
+        } else if (hasTag) {
+            m_textEmptyLibrary.setText("没有标签为「" + m_activeFilterTag + "」的游戏");
+        } else {
+            m_textEmptyLibrary.setText("没有可显示的游戏");
+        }
+    }
+
     private void updateGamelist() {
         m_gamelist.clear();
+        m_scanVisited = 0;
+
+        final int depth = getScanDepth();
+        final HashSet<String> added = new HashSet<>();
 
         if (m_appdirs != null) {
             for (String appdir : m_appdirs) {
-                File dir = new File(appdir);
-                File[] files = dir.listFiles();
-                if (files != null) {
-                    for (File file : files) {
-                        if (file == null || file.getName().equals("save")) continue;
-                        GameInfo gameinfo = new GameInfo(file.getAbsolutePath());
-                        if (gameinfo.m_name != null) m_gamelist.add(gameinfo);
-                    }
-                }
+                scanGamesInto(appdir, 1, depth, true, added);
             }
         }
 
-        if (m_gamedir != null) {
-            File dir = new File(m_gamedir);
-            File[] files = dir.listFiles();
-            if (files != null) {
-                for (File file : files) {
-                    if (file == null) continue;
-                    GameInfo gameinfo = new GameInfo(file.getAbsolutePath());
-                    if (gameinfo.m_name != null) m_gamelist.add(gameinfo);
-                }
-            }
+        if (m_gamedir != null && !m_gamedir.trim().isEmpty()) {
+            scanGamesInto(m_gamedir, 1, depth, false, added);
         }
 
         refreshGameUI();
-        if (m_textEmptyLibrary != null) {
-            m_textEmptyLibrary.setVisibility(m_gamelist.isEmpty() ? View.VISIBLE : View.GONE);
+        updateLibraryEmptyState();
+    }
+
+    /** 当前配置的扫描深度，越界值会被夹到 [1, 6]。 */
+    private int getScanDepth() {
+        int depth = 1;
+        try {
+            if (m_gameargs != null) depth = m_gameargs.optInt(PREF_SCANDEPTH, SCAN_DEPTH_MIN);
+        } catch (Exception e) {
+            depth = SCAN_DEPTH_MIN;
         }
+        if (depth < SCAN_DEPTH_MIN) depth = SCAN_DEPTH_MIN;
+        if (depth > SCAN_DEPTH_MAX) depth = SCAN_DEPTH_MAX;
+        return depth;
+    }
+
+    /**
+     * 递归收集 dirpath 下的游戏目录（depth 从 1 算起：dirpath 的直接子目录 = 第 1 层）。
+     *
+     *  - 已经到 maxDepth：按 isGameCandidateDeep 判定后收入
+     *    （深度 = 1 时退回旧行为：子目录全收，坏目录靠红色徽标提示）
+     *  - 还没到 maxDepth：
+     *      · 子目录里有游戏标志文件（.xp3 / .pfs / startup.tjs / system.ini）→ 当作游戏本体，不再往里钻
+     *      · 没有标志文件 → 当作"装着游戏的总目录"（比如 data/），继续往下找
+     *      · 钻完了但一个游戏都没找到 → 把这个总目录自己也当候选，免得目录在列表里凭空消失
+     */
+    private void scanGamesInto(String dirpath, int depth, int maxDepth,
+                               boolean skipSave, HashSet<String> added) {
+        if (dirpath == null || m_scanVisited >= SCAN_DIR_LIMIT) return;
+
+        File dir = new File(dirpath);
+        if (!dir.isDirectory()) return;
+
+        File[] files = dir.listFiles();
+        if (files == null) return;
+        m_scanVisited++;
+
+        // 固定顺序：按名字排一下，否则 listFiles 的顺序会让列表每次刷新都跳来跳去
+        Arrays.sort(files, (a, b) -> {
+            String an = (a != null) ? a.getName() : "";
+            String bn = (b != null) ? b.getName() : "";
+            return an.compareToIgnoreCase(bn);
+        });
+
+        for (File file : files) {
+            if (file == null || !file.isDirectory()) continue;
+            if (m_scanVisited >= SCAN_DIR_LIMIT) return;
+
+            final String name = file.getName();
+            // 深度 > 1 时 save/ 一律当存档目录跳过；深度 = 1 保持旧行为（应用私有目录仍跳过）
+            if (name.equals("save") && (skipSave || maxDepth > 1)) continue;
+            if (name.startsWith(".")) continue;
+
+            if (depth >= maxDepth) {
+                // 到达上限的最后一层。深度 = 1 时保持历史行为（子目录全收，坏目录靠红色徽标提示）；
+                // 更深层只收"像游戏"的目录，避免把装着游戏的上一级目录也塞进列表。
+                if (maxDepth <= 1 || isGameCandidateDeep(file)) {
+                    addGame(file, added);
+                }
+                continue;
+            }
+            if (looksLikeGameDir(file)) {
+                addGame(file, added);
+                continue;
+            }
+
+            final int before = m_gamelist.size();
+            scanGamesInto(file.getAbsolutePath(), depth + 1, maxDepth, skipSave, added);
+            if (m_gamelist.size() == before && hasAnyFile(file)) {
+                // 里面没扫出游戏、但自己带文件的目录（布局不标准）保留成候选，别让它凭空消失
+                addGame(file, added);
+            }
+        }
+    }
+
+    /** 把目录加进游戏列表，先按路径去重。返回是否真的加进去了。 */
+    private boolean addGame(File file, HashSet<String> added) {
+        final String path = file.getAbsolutePath();
+        if (added.contains(path)) return false;
+        GameInfo gameinfo = new GameInfo(path);
+        if (gameinfo.m_name == null) return false;
+        added.add(path);
+        m_gamelist.add(gameinfo);
+        return true;
+    }
+
+    /**
+     * 目录里有没有"这就是游戏本体"的标志文件。
+     * 判定口径和 GameInfo.detectEngineAuto / checkValid 保持一致，
+     * 用来区分「游戏目录」和「装着若干游戏的总目录」。
+     */
+    private boolean looksLikeGameDir(File dir) {
+        String[] list = dir.list();
+        if (list == null) return false;
+        for (String name : list) {
+            if (name == null) continue;
+            String lower = name.toLowerCase(Locale.US);
+            if (lower.endsWith(".xp3")
+                    || lower.endsWith(".pfs")
+                    || lower.equals("startup.tjs")
+                    || lower.equals("system.ini")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 到达扫描深度上限时的游戏判定：标志文件之外，还认"只有文件、没有子目录"的叶子目录
+     * （布局不标准的游戏，交给启动器按红色徽标提示）。
+     * 有子目录却没有标志文件的，基本是装着游戏的上一级目录，不收。
+     */
+    private boolean isGameCandidateDeep(File dir) {
+        if (looksLikeGameDir(dir)) return true;
+        String[] list = dir.list();
+        if (list == null || list.length == 0) return false;
+        for (String name : list) {
+            if (name != null && new File(dir, name).isDirectory()) return false;
+        }
+        return true;
+    }
+
+    /** 目录里有没有普通文件（用来判断它是不是个空壳目录）。 */
+    private boolean hasAnyFile(File dir) {
+        String[] list = dir.list();
+        if (list == null) return false;
+        for (String name : list) {
+            if (name != null && !new File(dir, name).isDirectory()) return true;
+        }
+        return false;
     }
 
     // ========== 历史记录 ==========
@@ -1323,11 +1618,14 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 构建引擎启动参数（按内核分流）。
      *
-     *   krkrsdl3（XP3/TJS）: <startup> [-render=software|gl] [--save-dir <dir>]
-     *   openartemis（PFS）:  <startup> --platform android|windows [--renderer gles]
+     *   krkrsdl3（XP3/TJS）: <startup> [--save-dir <dir>]
+     *   openartemis（PFS）:  <startup> --platform android|windows
      *
-     * 单人配置可覆盖：startup_file（数据源）、engine、render、platform、
-     * scopedsavedir；如果设置了 custom args，则完全替换全局配置生成的其他参数。
+     * 渲染器不在这里指定：用哪个后端由内核自己的缺省值决定，
+     * 需要覆盖时在单人配置的启动参数里手写（-render=gl / --renderer gles 等）。
+     *
+     * 单人配置可覆盖：startup_file（数据源）、engine、platform、scopedsavedir；
+     * 如果设置了 custom args，则完全替换全局配置生成的其他参数。
      */
     private ArrayList<String> buildLaunchArgs(String gamedir, JSONObject gameConfig, Engine engine) {
         ArrayList<String> args = new ArrayList<>();
@@ -1354,14 +1652,6 @@ public class MainActivity extends AppCompatActivity {
 
         // ③ 合并全局配置中的各项参数
         try {
-            String render = null;
-            if (gameConfig != null && gameConfig.has("render")) {
-                render = gameConfig.optString("render", "software");
-            } else if (m_gameargs != null) {
-                render = m_gameargs.optString("render", "software");
-            }
-            boolean useGl = render != null && "gl".equalsIgnoreCase(render.trim());
-
             if (engine == Engine.OPENARTEMIS) {
                 // 平台段：决定 system.ini 里的 [android]/[windows] 段与脚本 os 判定。
                 String platform = null;
@@ -1377,15 +1667,9 @@ public class MainActivity extends AppCompatActivity {
 
                 args.add("--platform");
                 args.add(platform);
-                if (useGl) {
-                    args.add("--renderer");
-                    args.add("gles");
-                }
                 // 存档隔离不走 argv,由 GameActivity 在原生启动前设置
                 // OA_SAVE_ROOT 环境变量(见 buildSaveRoot)。
             } else {
-                // krkrsdl3 的渲染参数是 -render=software|gl。
-                args.add("-render=" + (useGl ? "gl" : "software"));
                 // 隔离存档目录
                 if (m_gameargs != null && m_gameargs.optBoolean("scopedsavedir", false)) {
                     String savedir = buildSaveRoot(gamedir);
@@ -1698,6 +1982,7 @@ public class MainActivity extends AppCompatActivity {
         if (m_historyAdapter != null) m_historyAdapter.notifyDataSetChanged();
         if (m_historyGridAdapter != null) m_historyGridAdapter.notifyDataSetChanged();
         rebuildTagFilter();
+        updateLibraryEmptyState();
     }
 
     /**
@@ -1721,25 +2006,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 更新详情弹窗中的参数显示（渲染器/启动文件变化后调用）
-     * 直接替换 text_gameargs 中对应字段，修改后立即持久化
+     * 更新详情弹窗中的参数显示（启动文件/内核变化后调用）
+     * 替换 text_gameargs 里的第一个 token，修改后立即持久化
      */
     private void updateDetailArgsDisplay(GameInfo gameinfo, TextView text_startup,
-                                          RadioGroup detail_renderer_group,
                                           EditText text_gameargs, Engine engine) {
         String cmd = text_gameargs.getText().toString();
-        String newRender = (detail_renderer_group.getCheckedRadioButtonId() == R.id.detail_render_gl)
-                ? "gl" : "software";
         String newStartup = text_startup.getText().toString();
 
-        // 替换 -render=xxx / --renderer xxx
-        String updated = cmd.replaceAll("-render=\\S+", "-render=" + newRender);
-        if (updated.equals(cmd) && !cmd.contains("-render=")) {
-            updated = cmd + " -render=" + newRender;
-        }
-
         // 替换第一个 token（启动文件）
-        String[] parts = updated.split(" ", 2);
+        String[] parts = cmd.split(" ", 2);
+        String updated = cmd;
         if (!parts[0].equals(newStartup)) {
             updated = newStartup + (parts.length > 1 ? " " + parts[1] : "");
         }
@@ -1798,7 +2075,6 @@ public class MainActivity extends AppCompatActivity {
         // 获取所有详情弹窗中的控件引用
         EditText text_gameargs = view_gamedetail.findViewById(R.id.text_detail_gameargs);
         TextView text_startup = view_gamedetail.findViewById(R.id.text_detail_startup);
-        RadioGroup detail_renderer_group = view_gamedetail.findViewById(R.id.detail_renderer_group);
         RadioGroup detail_engine_group = view_gamedetail.findViewById(R.id.detail_engine_group);
         ImageButton btn_browse = view_gamedetail.findViewById(R.id.button_browse_startup);
         EditText text_tags = view_gamedetail.findViewById(R.id.text_detail_tags);
@@ -1828,11 +2104,6 @@ public class MainActivity extends AppCompatActivity {
         }
         text_startup.setText(startupFile.isEmpty() ? defaultStartup(detectedEngine) : startupFile);
 
-        // 初始化渲染器（缺省与全局设置面板一致：sdl = "software" 档）
-        String globalRender = m_gameargs != null ? m_gameargs.optString("render", "software") : "software";
-        String gameRender = gameConfig.optString("render", globalRender);
-        detail_renderer_group.check("gl".equals(gameRender) ? R.id.detail_render_gl : R.id.detail_render_software);
-
         // 初始化标签
         String tagsStr = gameConfig.optString("tags", "");
         text_tags.setText(tagsStr);
@@ -1860,12 +2131,6 @@ public class MainActivity extends AppCompatActivity {
 
         // --- 事件监听 ---
 
-        // 渲染器切换 → 更新参数显示
-        detail_renderer_group.setOnCheckedChangeListener((g, id) ->
-                updateDetailArgsDisplay(gameinfo, text_startup,
-                        detail_renderer_group, text_gameargs,
-                        currentDetailEngine(detail_engine_group, autoEngine)));
-
         // 内核切换 → 缺省启动文件跟着换，并刷新参数显示
         detail_engine_group.setOnCheckedChangeListener((g, id) -> {
             Engine engine = currentDetailEngine(detail_engine_group, autoEngine);
@@ -1873,14 +2138,12 @@ public class MainActivity extends AppCompatActivity {
             if (cur.equals("root.pfs") || cur.equals("data.xp3")) {
                 text_startup.setText(defaultStartup(engine));
             }
-            updateDetailArgsDisplay(gameinfo, text_startup,
-                    detail_renderer_group, text_gameargs, engine);
+            updateDetailArgsDisplay(gameinfo, text_startup, text_gameargs, engine);
         });
 
         // 启动文件浏览 → 更新参数显示
         btn_browse.setOnClickListener(v -> showStartupFilePicker(gameinfo, text_startup,
-                () -> updateDetailArgsDisplay(gameinfo, text_startup,
-                        detail_renderer_group, text_gameargs,
+                () -> updateDetailArgsDisplay(gameinfo, text_startup, text_gameargs,
                         currentDetailEngine(detail_engine_group, autoEngine))));
 
         Button button_run = view_gamedetail.findViewById(R.id.button_detail_run);
@@ -1900,8 +2163,6 @@ public class MainActivity extends AppCompatActivity {
             boolean hasOverride = false;
             try {
                 String su = text_startup.getText().toString();
-                int renderId = detail_renderer_group.getCheckedRadioButtonId();
-                String renderVal = (renderId == R.id.detail_render_gl) ? "gl" : "software";
 
                 // 内核
                 if (!engineOverride.isEmpty()) {
@@ -1911,11 +2172,6 @@ public class MainActivity extends AppCompatActivity {
                 // 启动文件
                 if (!su.equals(defaultStartup(launchEngine))) {
                     saveCfg.put("startup_file", su);
-                    hasOverride = true;
-                }
-                // 渲染器
-                if (!renderVal.equals(globalRender)) {
-                    saveCfg.put("render", renderVal);
                     hasOverride = true;
                 }
                 // 标签
@@ -1944,7 +2200,6 @@ public class MainActivity extends AppCompatActivity {
 
                 // 构建启动参数（始终使用 UI 当前值）
                 launchCfg.put("engine", engineOverride.isEmpty() ? "auto" : engineOverride);
-                launchCfg.put("render", renderVal);
                 if (!su.equals(defaultStartup(launchEngine))) launchCfg.put("startup_file", su);
                 if (argsEdited) {
                     String[] cp = currentCmd.split(" ", 2);
@@ -2030,7 +2285,6 @@ public class MainActivity extends AppCompatActivity {
     // ========== 全局配置读写 ==========
 
     private void updateGameConfig(boolean init) {
-        RadioGroup group_renderer = findViewById(R.id.group_renderer);
         RadioGroup group_platform = findViewById(R.id.group_platform);
         CheckBox button_scopedsavedir = findViewById(R.id.button_scopedsavedir);
         CheckBox button_alloweditargs = findViewById(R.id.button_alloweditargs);
@@ -2041,15 +2295,9 @@ public class MainActivity extends AppCompatActivity {
                 if (jsonstr == null) m_gameargs = new JSONObject();
                 else m_gameargs = new JSONObject(jsonstr);
 
-                // 渲染器：缺省 sdl（= "software" 档，不传 --renderer，走引擎
-                // 缺省线）。GLES 后端在 Android 上会把画面渲染到左上角一小块，
-                // 因此只作为显式选项保留。
-                String render = m_gameargs.optString("render", "software");
-                if ("gl".equals(render)) {
-                    group_renderer.check(R.id.button_render_gl);
-                } else {
-                    group_renderer.check(R.id.button_render_software);
-                }
+                // 渲染器不再由壳决定：旧版本存的 render 键只会在自定义参数里被显式
+                // 指定时才生效，这里顺手清掉，免得以后看配置时误以为还管用。
+                if (m_gameargs.has("render")) m_gameargs.remove("render");
 
                 // 平台段：决定 system.ini 读哪一段（[android] / [windows]），
                 // 同时参与脚本侧的 os 判定。Android 包默认 android。
@@ -2064,10 +2312,6 @@ public class MainActivity extends AppCompatActivity {
                 button_alloweditargs.setChecked(m_gameargs.optBoolean("alloweditargs", false));
             } else {
                 if (m_gameargs == null) m_gameargs = new JSONObject();
-
-                // 渲染器
-                int renderId = group_renderer.getCheckedRadioButtonId();
-                m_gameargs.put("render", (renderId == R.id.button_render_gl) ? "gl" : "software");
 
                 // 平台段
                 int platformId = group_platform.getCheckedRadioButtonId();

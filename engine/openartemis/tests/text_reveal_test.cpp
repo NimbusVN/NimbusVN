@@ -12,7 +12,7 @@
 
 #include "core/fs/fs.h"
 #include "core/runtime/runtime_game.h"
-#include "fpm/host_input.h"
+#include "fpm/test_host.h"
 #include "core/render/text.h"
 
 namespace {
@@ -41,32 +41,32 @@ void test_reveal_timing() {
     e.push_text("あいう"); // 3 字
     {
         const oa::render::MessageLayer* l = e.layer("adv01");
-        check(l && l->reveal_pending, "U1 new text is reveal pending");
+        check(l && !l->done, "U1 new text starts unrevealed");
         check(l && l->char_count == 3, "U1 char count = 3");
     }
-    e.reveal_next(0);
-    check(e.layer("adv01")->reveal_index == 1, "U1 index starts at 1");
-    e.reveal_next(24);
-    check(e.layer("adv01")->reveal_index == 1, "U2 before a delay slot stays 1");
-    e.reveal_next(1); // 25ms -> slot 2
-    check(e.layer("adv01")->reveal_index == 2, "U2 after one delay slot -> 2");
-    e.reveal_next(50); // clock 75 -> 4th slot, clamped to 3; total=75 -> done
-    check(e.layer("adv01")->reveal_index == 3, "U3 index clamps at char count");
-    check(!e.layer("adv01")->reveal_pending, "U3 pending cleared at max_total");
+    e.advance(0);
+    check(e.layer("adv01")->shown == 1, "U1 shown starts at 1");
+    e.advance(24);
+    check(e.layer("adv01")->shown == 1, "U2 before a delay slot stays 1");
+    e.advance(25); // 25ms -> slot 2
+    check(e.layer("adv01")->shown == 2, "U2 after one delay slot -> 2");
+    e.advance(75); // clock 75 -> 4th slot, clamped to 3; done
+    check(e.layer("adv01")->shown == 3, "U3 shown clamps at char count");
+    check(e.layer("adv01")->done, "U3 done at the last glyph");
     check(e.is_reveal_complete(), "U3 reveal complete");
     // 无 scetween：首帧全量
     TextEngine e2;
     e2.push_text("xy");
-    check(e2.layer("adv01")->reveal_pending, "U4 plain text pending");
-    e2.reveal_next(1);
-    check(e2.layer("adv01")->reveal_index == 2 && !e2.layer("adv01")->reveal_pending,
+    check(!e2.layer("adv01")->done, "U4 plain text starts unrevealed");
+    e2.advance(1);
+    check(e2.layer("adv01")->shown == 2 && e2.layer("adv01")->done,
           "U4 no scetween => full reveal on the first advance");
     // reveal_all 强制整页
     TextEngine e3;
     e3.apply_scetween(tag({{"type", "in"}, {"delay", "100"}}));
     e3.push_text("abcdef");
     e3.reveal_all();
-    check(e3.layer("adv01")->reveal_index == 6 && e3.is_reveal_complete(),
+    check(e3.layer("adv01")->shown == 6 && e3.is_reveal_complete(),
           "U4 reveal_all finishes the page");
 }
 

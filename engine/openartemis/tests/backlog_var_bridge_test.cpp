@@ -26,6 +26,8 @@ void check(bool cond, const char* what) {
 }
 
 using oa::runtime::Interpreter;
+using oa::runtime::InterpreterHooks;
+using oa::runtime::Value;
 using oa::runtime::ValueKind;
 using oa::render::TextEngine;
 
@@ -46,23 +48,75 @@ std::optional<std::string> var_str(Interpreter& it, const std::string& name) {
     return v->str_val;
 }
 
+// e:var(system=...) 现在只有一个入口（InterpreterHooks::system_var）：
+// 宿主给"变量名 → 值"的写列表，解释器照写。下面把三个 provider 拼成它，
+// 形状与 runtime.cpp 里的实现一致。
+struct VarProviders {
+    std::function<size_t()> backlog_size;
+    std::function<std::optional<std::vector<std::string>>(size_t, bool)> backlog_tags;
+    std::function<std::optional<std::vector<std::string>>(const std::string&, bool)>
+        message_tags;
+};
+
+void install_system_var(Interpreter& it, VarProviders p) {
+    it.hooks().system_var = [p](const std::string& system, const std::string& name,
+                                const std::map<std::string, std::string>& params)
+        -> std::optional<InterpreterHooks::VarWrites> {
+        using Writes = InterpreterHooks::VarWrites;
+        const auto arg = [&params](const char* k) {
+            const auto it2 = params.find(k);
+            return it2 == params.end() ? std::string() : it2->second;
+        };
+        Writes out;
+        if (system == "get_backlog_size" && p.backlog_size) {
+            out.emplace_back(name, Value::make_int((long long)p.backlog_size()));
+            return out;
+        }
+        if (system == "get_backlog_tags" && p.backlog_tags) {
+            size_t page = 0;
+            try {
+                page = (size_t)std::stoll(arg("page"));
+            } catch (...) {
+            }
+            const std::string af = arg("allfont");
+            const auto tags = p.backlog_tags(page, af == "1" || af == "true" || af == "on");
+            for (size_t i = 0; tags && i < tags->size(); ++i)
+                out.emplace_back(name + "." + std::to_string(i), Value::make_string((*tags)[i]));
+            out.emplace_back(name + ".size",
+                             Value::make_int(tags ? (long long)tags->size() : 0));
+            return out;
+        }
+        if (system == "get_message_tags" && p.message_tags) {
+            const std::string af = arg("allfont");
+            const auto tags =
+                p.message_tags(arg("id"), af == "1" || af == "true" || af == "on");
+            for (size_t i = 0; tags && i < tags->size(); ++i)
+                out.emplace_back(name + "." + std::to_string(i), Value::make_string((*tags)[i]));
+            out.emplace_back(name + ".size",
+                             Value::make_int(tags ? (long long)tags->size() : 0));
+            return out;
+        }
+        return std::nullopt;
+    };
+}
+
 // V1: 装上固定历史钩子，验证三个 backlog var system 的落值。
 void test_canned_hooks() {
     Interpreter it;
-    it.hooks().backlog_size = []() -> size_t { return 3; };
-    it.hooks().backlog_tags = [](size_t page, bool allfont)
-        -> std::optional<std::vector<std::string>> {
-        if (page >= 3) return std::nullopt;
-        std::vector<std::string> tags;
-        if (allfont) tags.push_back("[font size=\"40\"]");
-        tags.push_back("[print data=\"page" + std::to_string(page) + "\"]");
-        return tags;
-    };
-    it.hooks().message_tags = [](const std::string& id, bool)
-        -> std::optional<std::vector<std::string>> {
-        if (id != "adv01") return std::nullopt;
-        return std::vector<std::string>{"[print data=\"cur\"]"};
-    };
+    install_system_var(it, VarProviders{
+        []() -> size_t { return 3; },
+        [](size_t page, bool allfont) -> std::optional<std::vector<std::string>> {
+            if (page >= 3) return std::nullopt;
+            std::vector<std::string> tags;
+            if (allfont) tags.push_back("[font size=\"40\"]");
+            tags.push_back("[print data=\"page" + std::to_string(page) + "\"]");
+            return tags;
+        },
+        [](const std::string& id, bool) -> std::optional<std::vector<std::string>> {
+            if (id != "adv01") return std::nullopt;
+            return std::vector<std::string>{"[print data=\"cur\"]"};
+        },
+    });
 
     it.apply_var(tag({{"system", "get_backlog_size"}, {"name", "t.n"}}));
     check(var_int(it, "t.n") == 3, "V1 get_backlog_size writes the page count");
@@ -116,11 +170,11 @@ void test_engine_integration() {
 
     // 接线形状同 runtime.cpp open_project 的 hooks 安装。
     Interpreter it;
-    it.hooks().backlog_size = [&e]() -> size_t { return e.backlog_size(); };
-    it.hooks().backlog_tags = [&e](size_t page, bool allfont)
-        -> std::optional<std::vector<std::string>> { return e.backlog_tags(page, allfont); };
-    it.hooks().message_tags = [&e](const std::string& id, bool allfont)
-        -> std::optional<std::vector<std::string>> { return e.message_tags(id, allfont); };
+    install_system_var(it, VarProviders{
+        [&e]() -> size_t { return e.backlog_size(); },
+        [&e](size_t page, bool allfont) { return e.backlog_tags(page, allfont); },
+        [&e](const std::string& id, bool allfont) { return e.message_tags(id, allfont); },
+    });
 
     it.apply_var(tag({{"system", "get_backlog_size"}, {"name", "t.n"}}));
     check(var_int(it, "t.n") == 1, "V4 backlog_size reads the engine count");

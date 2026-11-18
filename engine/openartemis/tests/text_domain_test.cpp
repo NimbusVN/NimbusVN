@@ -12,7 +12,7 @@
 
 #include "core/fs/fs.h"
 #include "core/runtime/runtime_game.h"
-#include "fpm/host_input.h"
+#include "fpm/test_host.h"
 #include "core/render/layer.h"
 #include "core/render/text.h"
 
@@ -44,46 +44,34 @@ void test_message_layer_registry() {
     Compositor c;
     c.create("1", tag({{"file", "bg"}}));
     c.create("1.0", tag({{"file", "fg"}}));
+    c.create("1.0.adv", tag({{"file", "fg"}})); // 文本的宿主就是它自己的节点
     c.create("znotify", tag({{"file", "notify.png"}}));
-    c.set_message_layer_binding("adv", "1.0");
-    c.set_message_layer_binding("ui", "znotify");
-    c.set_default_message_layer("adv");
+    c.set_default_message_layer("1.0.adv");
 
-    // resolve: 普通 id 原样；~xxx → 绑定；~ → 默认层
+    // resolve：普通 id 原样；`~xxx` 就是 xxx（消息 id 即节点 id）；`~` 取默认层。
     check(c.resolve_message_target("1.0") == std::optional<std::string>("1.0"),
           "T1 plain ids pass through");
-    check(c.resolve_message_target("~adv") == std::optional<std::string>("1.0"),
-          "T1 ~ bound id maps to the scene target");
-    check(c.resolve_message_target("~") == std::optional<std::string>("1.0"),
-          "T1 bare ~ resolves the default message layer");
+    check(c.resolve_message_target("~1.0.adv") == std::optional<std::string>("1.0.adv"),
+          "T1 ~xxx resolves to the id itself");
+    check(c.resolve_message_target("~") == std::optional<std::string>("1.0.adv"),
+          "T1 bare ~ resolves the default layer");
     check(c.resolve_message_target("~zzz") == std::optional<std::string>("zzz"),
-          "T1 unbound ~xxx resolves to itself");
-    // 无默认层时裸 ~ 被忽略
+          "T1 ~zzz resolves to itself");
     c.set_default_message_layer(std::nullopt);
     check(!c.resolve_message_target("~").has_value(),
           "T2 bare ~ without default is ignored");
-    c.set_default_message_layer("adv");
+    c.set_default_message_layer("1.0.adv");
 
-    // M7: 槽位显式化 —— hex 编码取消。layered=0 消息分配引擎消息槽(创建
-    // 序,不随消息 id 变,同名复用);layered=1 消息 = 宿主树节点自身。
-    const std::string slot_adv = c.ensure_message_scene_node("adv", false);
-    check(slot_adv != "adv" && c.is_message_slot(slot_adv) &&
-              c.find(slot_adv) != nullptr,
-          "T3 layered=0 message gets an engine message slot");
-    check(c.ensure_message_scene_node("adv", false) == slot_adv,
-          "T3 same message reuses its slot (slot id not derived from content)");
-    check(c.ensure_message_scene_node("znotify", true) == "znotify",
-          "T3 layered message keeps its own id (host node)");
-
-    // 删除绑定目标子树 → 消息层标记为失效（绑定清理 + 默认层清理）
+    // 文本是节点内容：节点在就画；整棵宿主树删掉就没了，默认层随之失效。
+    check(c.is_message_layer_drawable("1.0.adv", true),
+          "T3 text draws while its node lives");
+    check(c.is_message_layer_drawable("znotify", true),
+          "T3 single-segment overlay draws");
     c.remove("1");
-    check(!c.is_message_layer_visible("adv"), "T4 removing the scene tree hides the layer");
+    check(!c.is_message_layer_drawable("1.0.adv", true),
+          "T4 deleting the host tree hides the text");
     check(!c.resolve_message_target("~").has_value(),
-          "T4 default message layer cleared after its subtree removal");
-    check(c.resolve_message_target("~ui") == std::optional<std::string>("znotify"),
-          "T4 intact binding still maps after an unrelated removal");
-    c.revive_message_layer("ui");
-    check(c.is_message_layer_visible("ui"), "T4 revived message layer visible again");
+          "T4 default layer cleared with its subtree");
 }
 
 // ---------------------------------------------------------------- T5-T10 engine
@@ -241,7 +229,7 @@ void test_engine_state_machine() {
     e8.set_text_hidden(true);
     check(e8.visible_content_layers().empty(), "T10 sceout hides the text layer");
     e8.set_text_hidden(false);
-    e8.reveal_next(1); // 无 scetween → 首帧全量揭示（reveal_index 生效）
+    e8.advance(1); // 无 scetween → 整页瞬时显示
     check(e8.visible_content_layers().size() == 1, "T10 scein shows it again");
 }
 
@@ -485,12 +473,12 @@ void test_text_node_materialization_and_world_chain() {
         rt.interpreter().enqueue_tag("lyprop", {{"id", "grp"}, {"visible", "0"}});
         oa::test::frame(rt);
         (void)rt.drain_events();
-        check(!rt.scene().is_message_layer_visible("grp.sheet.txt"),
+        check(!rt.scene().is_message_layer_drawable("grp.sheet.txt", true),
               "R4-5 hiding the parent group hides the text layer");
         rt.interpreter().enqueue_tag("lyprop", {{"id", "grp"}, {"visible", "1"}});
         oa::test::frame(rt);
         (void)rt.drain_events();
-        check(rt.scene().is_message_layer_visible("grp.sheet.txt"),
+        check(rt.scene().is_message_layer_drawable("grp.sheet.txt", true),
               "R4-6 showing the parent group revives text visibility");
     }
 }
@@ -587,18 +575,18 @@ void test_overlay_text_hides_with_tree_ancestor() {
     oa::test::frame(rt);
     (void)rt.drain_events();
     const std::string msg = "1.80.mw.adv_adv";
-    check(rt.text().layer(msg) != nullptr && rt.scene().is_message_layer_visible(msg),
+    check(rt.text().layer(msg) != nullptr && rt.scene().is_message_layer_drawable(msg, true),
           "R5-5 overlay text visible with the tree ancestor shown");
     // 隐藏 1.80（FPM msg_hide 语义）→ overlay 文本必须不可见
     rt.interpreter().enqueue_tag("lyprop", {{"id", "1.80"}, {"visible", "0"}});
     oa::test::frame(rt);
     (void)rt.drain_events();
-    check(!rt.scene().is_message_layer_visible(msg),
+    check(!rt.scene().is_message_layer_drawable(msg, true),
           "R5-6 hiding the message-window tree root hides the overlay text");
     rt.interpreter().enqueue_tag("lyprop", {{"id", "1.80"}, {"visible", "1"}});
     oa::test::frame(rt);
     (void)rt.drain_events();
-    check(rt.scene().is_message_layer_visible(msg),
+    check(rt.scene().is_message_layer_drawable(msg, true),
           "R5-7 showing the tree root revives the overlay text");
 }
 
@@ -634,16 +622,13 @@ void test_runtime_text_flow() {
         check(approx(ml->left, 100) && approx(ml->top, 500) && approx(ml->width, 600),
               "T16 font geometry stored on the layer");
         check(!ml->page.empty(), "T16 prints filled the page buffer");
-        check(rt.scene().is_message_layer_visible("adv"),
+        check(rt.scene().is_message_layer_drawable("adv", true),
               "T16 message layer visible via registry");
-        // R4/M7：文本节点物化（ apply_message_layer_binding ensure_layer,
-        // runtime/）——字形作为节点本地内容经世界变换合成；
-        // layered=0 消息绑到引擎消息槽（结构标记,非前缀命名），槽在根
-        // （0,0）恒等变换 = 绝对坐标文本。
-        const std::string ov_id = rt.scene().bound_scene_id("adv");
+        // 文本节点物化：消息 id 就是节点 id，字形作为节点本地内容经世界
+        // 变换合成（没有槽、没有绑定表）。
+        const std::string ov_id = "adv";
         const oa::render::Layer* ov = rt.scene().find(ov_id);
-        check(ov != nullptr && ov_id != "adv" && rt.scene().is_message_slot(ov_id),
-              "T16 message slot node materialized");
+        check(ov != nullptr, "T16 message node materialized (id == node id)");
         if (ov) {
             oa::render::Affine2 w;
             check(rt.scene().world_transform(ov->id, &w) && w.is_plain_translation() &&
@@ -866,7 +851,7 @@ void test_orphan_print_paint_gate() {
           "63 500.p03 node auto-materialized by the message binding (not authored)");
     check(ml && !ml->positioned && !drawable("500.p03"),
           "63 unboxed orphan print is NOT drawable");
-    check(rt.scene().is_message_layer_visible("500.p03"),
+    check(rt.scene().is_message_layer_drawable("500.p03", true),
           "63 orphan stays registry-visible (scene semantics unchanged)");
     // ---- phase B: [font] with layout keys gives the layer a text box ----
     rt.interpreter().enqueue_tag("chgmsg", {{"id", "500.p03"}, {"layered", "1"}});
