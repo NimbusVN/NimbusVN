@@ -26,40 +26,6 @@
         android:layout_marginBottom="12dp"
         android:background="@color/text_muted" />
 
-    <!-- 平台段选择：决定 system.ini 走哪个 OS 段（[android] / [windows]） -->
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="平台"
-        android:textColor="@color/text_secondary"
-        android:textSize="12sp" />
-
-    <RadioGroup
-        android:id="@+id/group_platform"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:orientation="horizontal">
-
-        <RadioButton
-            android:id="@+id/button_platform_android"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="android"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
-
-        <RadioButton
-            android:id="@+id/button_platform_windows"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginLeft="20dp"
-            android:text="windows"
-            android:textColor="@color/text_secondary"
-            android:textSize="13sp" />
-    </RadioGroup>
-
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
@@ -97,7 +63,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="调到 2 层以上时，选 data 也能扫出 data/krkr、data/artemis。下钻时只把带 xp3 / pfs / system.ini 的目录当成游戏，纯文件夹会继续往下找。"
+        android:text="调到 2 层以上时，选 data 也能扫出 data/krkr、data/artemis、data/ons。下钻时只把带 xp3 / pfs / system.ini / nscript.dat / nsa 的目录当成游戏，纯文件夹会继续往下找。"
         android:textColor="@color/text_muted"
         android:textSize="11sp" />
 

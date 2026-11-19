@@ -1,7 +1,7 @@
 {
     "name": "nimbus-vn",
-    "version-string": "1.0.0",
-    "description": "Dual-engine build tree: krkrsdl3 (XP3/TJS) + openartemis (PFS/Artemis)",
+    "version-string": "0.1.0",
+    "description": "Multi-engine build tree: krkrsdl3 (XP3/TJS) + openartemis (PFS/Artemis) + onscripter (ONS/NScripter)",
     "dependencies": [
         "oniguruma",
         "zlib",

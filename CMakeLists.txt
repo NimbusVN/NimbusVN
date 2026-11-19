@@ -3,19 +3,22 @@ cmake_minimum_required(VERSION 3.28)
 #
 # 0. 内核选择
 #
-# NimbusVN：多内核集成项目（当前为 krkrsdl3 + openartemis，后续可继续接入其它内核）。
-#   engine/krkrsdl3   — Kirikiri SDL3（XP3/TJS）
+# NimbusVN：多内核集成项目（krkrsdl3 + openartemis + onscripter）。
+#   engine/krkrsdl3    — Kirikiri SDL3（XP3/TJS）
 #   engine/openartemis — Artemis 系视觉小说引擎（PFS/Artemis）
+#   engine/onscripter  — ONScripter 的 SDL3 移植（NScripter 脚本 + nsa/sar）
 #
-# 两个内核都是 git 子模块；桌面/Android/WASM 默认全部构建。
-# OHOS 目前只构建 krkrsdl3（openartemis 的 OHOS 原生后端尚未实现），
-# 启动器会做游戏类型自动识别，PFS 游戏会提示当前构建不含该内核。
+# 三个内核都是 git 子模块；桌面/Android/WASM 默认全部构建。
+# OHOS 目前只构建 krkrsdl3（openartemis 与 onscripter 的 OHOS 原生后端尚未实现），
+# 启动器会做游戏类型自动识别，PFS/ONS 游戏会提示当前构建不含该内核。
 #
 option(ENGINE_KRKRSDL3 "Build the krkrsdl3 (XP3/TJS) engine" ON)
 if(OHOS)
     option(ENGINE_OPENARTEMIS "Build the openartemis (PFS/Artemis) engine" OFF)
+    option(ENGINE_ONSCRIPTER "Build the ONScripter (NScripter) engine" OFF)
 else()
     option(ENGINE_OPENARTEMIS "Build the openartemis (PFS/Artemis) engine" ON)
+    option(ENGINE_ONSCRIPTER "Build the ONScripter (NScripter) engine" ON)
 endif()
 
 # 每个引擎是一层目录：engine/<name>/{src(子模块), docs, cmake, tests}。
@@ -24,6 +27,8 @@ set(KRKRSDL3_DIR ${CMAKE_CURRENT_SOURCE_DIR}/engine/krkrsdl3)
 set(KRKRSDL3_ROOT ${KRKRSDL3_DIR}/src)
 set(OPENARTEMIS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/engine/openartemis)
 set(OPENARTEMIS_ROOT ${OPENARTEMIS_DIR}/src)
+set(ONSCRIPTER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/engine/onscripter)
+set(ONSCRIPTER_ROOT ${ONSCRIPTER_DIR}/src)
 
 #
 # 1. 准备阶段
@@ -134,13 +139,18 @@ option(OA_ENABLE_FUZZ "Build the openartemis parser fuzzers + monkey" OFF)
 if(ONLYCONSOLE)
     set(ENGINE_KRKRSDL3 ON)
     set(ENGINE_OPENARTEMIS OFF)
+    set(ENGINE_ONSCRIPTER OFF)
 endif()
-if(NOT ENGINE_KRKRSDL3 AND NOT ENGINE_OPENARTEMIS)
-    message(FATAL_ERROR "ENGINE_KRKRSDL3 与 ENGINE_OPENARTEMIS 至少开启一个")
+if(NOT ENGINE_KRKRSDL3 AND NOT ENGINE_OPENARTEMIS AND NOT ENGINE_ONSCRIPTER)
+    message(FATAL_ERROR "ENGINE_KRKRSDL3 / ENGINE_OPENARTEMIS / ENGINE_ONSCRIPTER 至少开启一个")
 endif()
 if(ENGINE_OPENARTEMIS AND OHOS)
     message(STATUS "OHOS: openartemis 原生后端尚未实现，本次只构建 krkrsdl3")
     set(ENGINE_OPENARTEMIS OFF)
+endif()
+if(ENGINE_ONSCRIPTER AND OHOS)
+    message(STATUS "OHOS: onscripter 原生后端尚未接入，本次不构建该内核")
+    set(ENGINE_ONSCRIPTER OFF)
 endif()
 if(ENABLE_AUTOTEST)
     add_definitions(-D_KRKRSDL3_AUTOTEST=1)
@@ -156,7 +166,7 @@ if(NOT NIMBUSVN_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+(-(alpha|beta|rc)(\\.[
 endif()
 string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" NIMBUSVN_VERSION_CORE "${NIMBUSVN_VERSION}")
 
-# 建立项目（NimbusVN 是统合两个内核的集成项目名；内核目标名保持
+# 建立项目（NimbusVN 是统合三个内核的集成项目名；内核目标名保持
 # krkrsdl3 / openartemis，Android 原生库与平台入口依赖这些名字）
 if(ONLYCONSOLE)
     project(tjs2 VERSION "${NIMBUSVN_VERSION_CORE}" LANGUAGES C CXX)
@@ -261,6 +271,9 @@ else()
     endif()
     if(ENGINE_OPENARTEMIS)
         include(${OPENARTEMIS_DIR}/cmake/cmake_main.txt)
+    endif()
+    if(ENGINE_ONSCRIPTER)
+        include(${ONSCRIPTER_DIR}/cmake/cmake_main.txt)
     endif()
 endif()
 

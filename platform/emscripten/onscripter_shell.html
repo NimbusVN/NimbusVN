@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>NimbusVN · ONScripter (WebAssembly)</title>
+    <!--
+      ONScripter web shell（engine/onscripter/cmake/cmake_main.txt 里由
+      --shell-file 引用）。构建时带 -sINVOKE_RUN=0，所以页面加载时不会自己
+      main()：页面先把游戏数据写进 MEMFS，再调用一次 Module.callMain()。
+
+      启动方式：
+        ?dir=/data     直接启动 MEMFS 里已有的目录（预载 .data 构建）
+        ?args=a,b,c    追加引擎参数（如 --ons-encoding,gbk）
+        （都不给）      显示选择器：选目录（保留相对路径）或多选文件
+
+      目录里应当有 nscript.dat（或 nscript.___）以及 arc.nsa / *.nsa /
+      default.ttf 等资源；引擎会在游戏目录里自行探测脚本与封包，
+      所以页面只把目录交给它，不需要指定启动文件名。
+
+      存档写到 /save（IDBFS -> IndexedDB，需要 -lidbfs.js，已在 CMake 里链接）。
+    -->
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0f0f1a;
+            color: #ccc;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden; height: 100vh; width: 100vw;
+        }
+        #loading {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
+            z-index: 1000; transition: opacity 0.8s ease;
+        }
+        #loading.hidden { opacity: 0; pointer-events: none; }
+        #loading .logo {
+            font-size: 2.5em; font-weight: 800;
+            background: linear-gradient(90deg, #4caf50, #8bc34a);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin-bottom: 0.3em; letter-spacing: 2px;
+        }
+        #loading .subtitle { color: #666; margin-bottom: 2em; font-size: 0.9em; }
+        #progress-wrap { width: 320px; height: 4px; background: #222; border-radius: 2px; overflow: hidden; }
+        #progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, #4caf50, #8bc34a); transition: width 0.3s ease; }
+        #status-text { margin-top: 1.2em; font-size: 0.85em; color: #555; min-height: 1.2em; }
+        .spinner {
+            width: 24px; height: 24px; margin-top: 20px;
+            border: 3px solid #333; border-top-color: #4caf50;
+            border-radius: 50%; animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        canvas {
+            display: block;
+            position: fixed; top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            object-fit: contain;
+            image-rendering: auto;
+            z-index: 100;
+            pointer-events: auto;
+        }
+        #error-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); z-index: 2000;
+            flex-direction: column; align-items: center; justify-content: center;
+        }
+        #error-overlay.show { display: flex; }
+        #error-overlay h2 { color: #e94560; margin-bottom: 0.5em; font-size: 1.5em; }
+        #error-overlay p { color: #999; max-width: 620px; text-align: center; line-height: 1.6; }
+        #error-overlay .btn {
+            margin-top: 2em; padding: 0.7em 2em; background: #4caf50; color: #fff;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 1em;
+        }
+        #error-overlay .btn:hover { background: #3d8b40; }
+        #picker { display: none; flex-direction: column; align-items: center; gap: 14px; margin-top: 1.5em; }
+        #picker.show { display: flex; }
+        #picker .drop {
+            width: 440px; max-width: 86vw; padding: 22px; border: 2px dashed #333;
+            border-radius: 8px; text-align: center; color: #888; font-size: 0.9em; line-height: 1.7;
+        }
+        #picker .drop.hover { border-color: #4caf50; color: #ccc; }
+        #picker .row { display: flex; gap: 10px; }
+        #picker button {
+            padding: 0.6em 1.4em; background: #1f1f33; color: #ddd; border: 1px solid #333;
+            border-radius: 4px; cursor: pointer; font-size: 0.9em;
+        }
+        #picker button:hover { background: #2a2a45; border-color: #4caf50; }
+        #picker .hint { color: #555; font-size: 0.78em; line-height: 1.7; text-align: center; }
+        code { background: #1c1c2c; padding: 1px 5px; border-radius: 3px; font-size: 0.9em; color: #9ab; }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="logo">NimbusVN</div>
+        <div class="subtitle">ONScripter engine · WebAssembly</div>
+        <div id="progress-wrap"><div id="progress-fill"></div></div>
+        <div id="status-text">Initializing…</div>
+        <div class="spinner" id="spinner"></div>
+        <div id="picker">
+            <div class="drop" id="drop">
+                把游戏目录拖进来<br>
+                <span style="font-size:0.85em">（需要包含 <code>nscript.dat</code> 与 <code>arc.nsa</code> 等资源）</span>
+            </div>
+            <div class="row">
+                <button id="btn-dir">选择游戏目录</button>
+                <button id="btn-files">多选文件</button>
+            </div>
+            <div class="hint">
+                也可以直接用 URL 启动：<code>?dir=/data</code>（预载进 MEMFS 的目录）或
+                <code>?dir=/data&amp;args=--ons-encoding,gbk</code><br>
+                目录方式会保留相对路径；多选文件方式把文件平铺到 <code>/data</code>，
+                适合 <code>nscript.dat</code> + <code>arc.nsa</code> + <code>default.ttf</code> 这种根目录布局。
+            </div>
+            <input id="dir-input" type="file" webkitdirectory directory multiple style="display:none">
+            <input id="files-input" type="file" multiple style="display:none">
+        </div>
+    </div>
+    <div id="error-overlay">
+        <h2>启动失败</h2>
+        <p id="error-message">未知错误。请查看日志面板或浏览器控制台。</p>
+        <button class="btn" onclick="location.reload()">重新加载</button>
+    </div>
+    <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+
+    <script>
+        // ── 日志面板（` 键切换）─────────────────────────────────────────
+        var logPanel = null, logToggle = null, logVisible = false;
+        function toggleLog(show) {
+            logVisible = show !== undefined ? show : !logVisible;
+            if (logPanel) logPanel.style.display = logVisible ? 'block' : 'none';
+            if (logToggle) logToggle.textContent = logVisible ? '▼ 日志' : '▲ 日志';
+        }
+        function appendLog(level, args) {
+            var text = Array.prototype.join.call(args, ' ');
+            console[level].apply(console, args);
+            if (!logPanel) {
+                logPanel = document.createElement('div');
+                logPanel.id = 'log-panel';
+                logPanel.style.cssText = 'position:fixed;bottom:36px;right:8px;width:520px;max-width:92vw;max-height:300px;overflow-y:auto;background:rgba(0,0,0,0.85);color:#8bc34a;font-family:monospace;font-size:11px;padding:6px;border-radius:4px;z-index:3000;display:none;';
+                document.body.appendChild(logPanel);
+                logToggle = document.createElement('div');
+                logToggle.id = 'log-toggle';
+                logToggle.style.cssText = 'position:fixed;bottom:8px;right:8px;padding:4px 10px;background:rgba(0,0,0,0.5);color:#666;font-family:monospace;font-size:11px;border-radius:4px;cursor:pointer;z-index:3001;user-select:none;';
+                logToggle.textContent = '📋 日志';
+                logToggle.onclick = function() { toggleLog(); };
+                document.body.appendChild(logToggle);
+            }
+            var entry = document.createElement('div');
+            entry.textContent = '[' + level + '] ' + text;
+            entry.style.color = level === 'error' ? '#e94560' : '#8bc34a';
+            logPanel.appendChild(entry);
+            logPanel.scrollTop = logPanel.scrollHeight;
+        }
+
+        var statusEl = document.getElementById('status-text');
+        var fillEl = document.getElementById('progress-fill');
+        var loadingEl = document.getElementById('loading');
+        var spinnerEl = document.getElementById('spinner');
+        var pickerEl = document.getElementById('picker');
+        var errorOverlay = document.getElementById('error-overlay');
+        var errorMsgEl = document.getElementById('error-message');
+        var canvasEl = document.getElementById('canvas');
+
+        function updateProgress(msg, pct) {
+            statusEl.textContent = msg || '';
+            if (fillEl && typeof pct === 'number') fillEl.style.width = Math.min(pct, 100) + '%';
+        }
+        function showError(msg) {
+            errorMsgEl.innerHTML = msg || 'Unknown error';
+            errorOverlay.classList.add('show');
+            loadingEl.classList.add('hidden');
+            appendLog('error', [msg]);
+        }
+
+        // ── 音频解锁：浏览器要求用户手势后才能出声 ────────────────────
+        var _audioContexts = [];
+        var _origAudioContext = (typeof AudioContext !== 'undefined') ? AudioContext : null;
+        function PatchedAudioContext() {
+            var ctx = new _origAudioContext(arguments[0]);
+            _audioContexts.push(ctx);
+            return ctx;
+        }
+        PatchedAudioContext.prototype = _origAudioContext ? _origAudioContext.prototype : {};
+        if (_origAudioContext) {
+            for (var k in _origAudioContext)
+                if (_origAudioContext.hasOwnProperty(k)) PatchedAudioContext[k] = _origAudioContext[k];
+            window.AudioContext = PatchedAudioContext;
+        }
+        function unlockAudio() {
+            for (var i = 0; i < _audioContexts.length; i++) {
+                var ctx = _audioContexts[i];
+                if (ctx && ctx.state === 'suspended' && ctx.resume) ctx.resume();
+            }
+        }
+        document.addEventListener('pointerdown', unlockAudio);
+        document.addEventListener('keydown', function(e) {
+            unlockAudio();
+            if (e.key === '`' || e.key === '~') { toggleLog(); e.preventDefault(); }
+        });
+
+        // ── 全局异常 ────────────────────────────────────────────────────
+        window.addEventListener('error', function(e) {
+            var detail = '';
+            if (e.error) { try { detail = e.error.toString() + (e.error.stack ? '\n' + e.error.stack : ''); } catch(_) {} }
+            if (!detail) detail = e.message || 'Unknown error';
+            appendLog('error', ['Global error:', detail]);
+            showError('未捕获错误: ' + detail.replace(/\n/g, '<br>'));
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+            var detail = '';
+            try { detail = e.reason.toString() + (e.reason.stack ? '\n' + e.reason.stack : ''); } catch(_) {}
+            appendLog('error', ['Unhandled promise rejection:', detail]);
+        });
+
+        // ── MEMFS 写入 ──────────────────────────────────────────────────
+        function ensureDir(path) {
+            var parts = path.split('/');
+            var dir = '';
+            for (var i = 0; i < parts.length; i++) {
+                if (!parts[i]) continue;
+                dir += '/' + parts[i];
+                try { Module.FS.mkdir(dir); } catch (e) {}
+            }
+        }
+
+        function writeFileToMemfs(path, bytes) {
+            var idx = path.lastIndexOf('/');
+            if (idx > 0) ensureDir(path.substring(0, idx));
+            try { Module.FS.unlink(path); } catch (e) {}
+            Module.FS.writeFile(path, bytes);
+        }
+
+        // ── 启动参数 ────────────────────────────────────────────────────
+        var urlParams = new URLSearchParams(window.location.search);
+        var engineStarted = false, moduleReady = false;
+
+        // ?args=a,b,c 是"追加参数"（如 --ons-encoding,gbk），
+        // 游戏目录是第一参数，由页面决定。
+        function extraArgs() {
+            var s = urlParams.get('args');
+            if (!s) return [];
+            return s.split(',').map(function(v) { return decodeURIComponent(v); })
+                    .filter(function(v) { return v.length > 0; });
+        }
+
+        async function prepareSaveDir() {
+            // /save 挂在 IDBFS 上；构建没链接 -lidbfs.js 时静默降级为 MEMFS。
+            try {
+                Module.FS.mkdir('/save');
+            } catch (e) {}
+            try {
+                Module.FS.mount(Module.FS.filesystems.IDBFS, {}, '/save');
+                await new Promise(function(resolve) {
+                    Module.FS.syncfs(true, function(err) {
+                        if (err) appendLog('log', ['IDBFS 读取失败（本次存档不持久）:', err]);
+                        resolve();
+                    });
+                });
+                appendLog('log', ['存档目录 /save -> IndexedDB']);
+            } catch (e) {
+                appendLog('log', ['IDBFS 不可用，/save 仅在内存中:', e]);
+            }
+        }
+
+        function startEngine(rootDir, extra) {
+            var argv = [rootDir, '--save-dir', '/save'].concat(extra || []);
+            appendLog('log', ['启动参数:', JSON.stringify(argv)]);
+            if (!moduleReady || engineStarted) return;
+            engineStarted = true;
+            pickerEl.classList.remove('show');
+            spinnerEl.style.display = 'block';
+            updateProgress('启动引擎…', 90);
+            try {
+                Module.callMain(argv);
+                loadingEl.classList.add('hidden');
+            } catch (err) {
+                showError('引擎启动失败: ' + err);
+            }
+        }
+
+        // ── 交互式选择 ──────────────────────────────────────────────────
+        function showPicker() {
+            spinnerEl.style.display = 'none';
+            pickerEl.classList.add('show');
+            updateProgress('选择游戏数据开始', 0);
+
+            var dirInput = document.getElementById('dir-input');
+            var filesInput = document.getElementById('files-input');
+            document.getElementById('btn-dir').onclick = function() { dirInput.click(); };
+            document.getElementById('btn-files').onclick = function() { filesInput.click(); };
+
+            dirInput.onchange = async function(e) {
+                var files = Array.from(e.target.files || []);
+                if (!files.length) return;
+                try {
+                    // webkitRelativePath = "<所选目录>/<子目录>/<文件>"：
+                    // 去掉第一段，让所选目录本身就变成 /data。
+                    var root = files[0].webkitRelativePath.split('/')[0];
+                    for (var i = 0; i < files.length; i++) {
+                        var rel = files[i].webkitRelativePath.substring(root.length + 1);
+                        if (!rel) continue;
+                        updateProgress('写入 ' + rel + ' (' + (i + 1) + '/' + files.length + ')',
+                                       (i / files.length) * 70);
+                        writeFileToMemfs('/data/' + rel, new Uint8Array(await files[i].arrayBuffer()));
+                    }
+                    appendLog('log', ['目录写入完成：' + files.length + ' 个文件 -> /data']);
+                    startEngine('/data', extraArgs());
+                } catch (err) { showError('读取目录失败: ' + err); }
+            };
+
+            filesInput.onchange = async function(e) {
+                var files = Array.from(e.target.files || []);
+                if (!files.length) return;
+                try {
+                    for (var i = 0; i < files.length; i++) {
+                        updateProgress('写入 ' + files[i].name + ' (' + (i + 1) + '/' + files.length + ')',
+                                       (i / files.length) * 70);
+                        writeFileToMemfs('/data/' + files[i].name,
+                                         new Uint8Array(await files[i].arrayBuffer()));
+                    }
+                    appendLog('log', ['文件写入完成：' + files.length + ' 个 -> /data']);
+                    startEngine('/data', extraArgs());
+                } catch (err) { showError('读取文件失败: ' + err); }
+            };
+
+            var drop = document.getElementById('drop');
+            ['dragenter', 'dragover'].forEach(function(t) {
+                drop.addEventListener(t, function(e) { e.preventDefault(); drop.classList.add('hover'); });
+            });
+            ['dragleave', 'drop'].forEach(function(t) {
+                drop.addEventListener(t, function(e) { e.preventDefault(); drop.classList.remove('hover'); });
+            });
+            drop.addEventListener('drop', async function(e) {
+                try {
+                    var items = Array.from(e.dataTransfer.files || []);
+                    if (!items.length) return;
+                    for (var i = 0; i < items.length; i++) {
+                        // 拖拽目录时 webkitRelativePath 为空，只能平铺；提示用户优先用"选择目录"。
+                        var rel = items[i].webkitRelativePath || items[i].name;
+                        var dest = items[i].webkitRelativePath
+                            ? '/data/' + rel.substring(rel.split('/')[0].length + 1)
+                            : '/data/' + rel;
+                        updateProgress('写入 ' + rel + ' (' + (i + 1) + '/' + items.length + ')',
+                                       (i / items.length) * 70);
+                        writeFileToMemfs(dest, new Uint8Array(await items[i].arrayBuffer()));
+                    }
+                    startEngine('/data', extraArgs());
+                } catch (err) { showError('拖入失败: ' + err); }
+            });
+        }
+
+        // ── Emscripten 模块 ────────────────────────────────────────────
+        window.Module = {
+            canvas: canvasEl,
+            arguments: [],
+            print: function() { appendLog('log', arguments); },
+            printErr: function() { appendLog('log', arguments); },
+            setStatus: function(text) {
+                if (!text) { return; }
+                var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+                if (m) updateProgress(m[1].trim(), parseFloat(m[2]) / parseFloat(m[4]) * 100);
+                else updateProgress(text, 80);
+            },
+            onRuntimeInitialized: function() {
+                moduleReady = true;
+                (async function() {
+                    await prepareSaveDir();
+
+                    // ?dir=/data 直接启动预载目录（.data 构建或自己往 MEMFS 里塞过文件）。
+                    var dir = urlParams.get('dir');
+                    if (dir) {
+                        startEngine(decodeURIComponent(dir), extraArgs());
+                        return;
+                    }
+
+                    // ?args= 单独出现时按默认 /data 处理（配合预载 .data 使用）。
+                    var extra = extraArgs();
+                    var preloaded = false;
+                    try {
+                        var entries = Module.FS.readdir('/data').filter(function(n) {
+                            return n !== '.' && n !== '..';
+                        });
+                        preloaded = entries.length > 0;
+                    } catch (e) {}
+                    if (preloaded && extra.length) {
+                        startEngine('/data', extra);
+                        return;
+                    }
+
+                    showPicker();
+                })();
+
+                // 定时 / 离开页面时把 /save 刷回 IndexedDB。
+                setInterval(function() { syncSaves(); }, 5000);
+            },
+            onAbort: function(text) { showError(text || '引擎异常终止。'); }
+        };
+
+        function syncSaves() {
+            try {
+                if (Module && Module.FS && Module.FS.syncfs) Module.FS.syncfs(false, function() {});
+            } catch (e) {}
+        }
+        window.addEventListener('beforeunload', syncSaves);
+        document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'hidden') syncSaves();
+        });
+    </script>
+    {{{ SCRIPT }}}
+</body>
+</html>

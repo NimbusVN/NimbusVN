@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">NimbusVN</string>
     <string name="app_about">
-        NimbusVN 游戏启动器 - 多内核：krkrsdl3 (XP3/TJS) + openartemis (PFS/Artemis) \n\n
+        NimbusVN 游戏启动器 - 三内核：krkrsdl3 (XP3/TJS) + openartemis (PFS/Artemis) + onscripter (ONS/NScripter) \n\n
         使用说明：\n
         1. 游戏管理 \n
            点击游戏卡片查看详情\n
@@ -10,14 +10,18 @@
         2. 内核自动识别 \n
            data.xp3 / *.xp3 / startup.tjs → krkrsdl3\n
            root.pfs / *.pfs / system.ini → openartemis\n
+           nscript.dat / *.nsa / *.sar → onscripter\n
            详情页可手动覆盖识别结果\n\n
         3. 数据源 \n
            krkrsdl3: data.xp3 等 XP3 包\n
-           openartemis: root.pfs 包,或含 system.ini 的解包目录\n\n
+           openartemis: root.pfs 包,或含 system.ini 的解包目录\n
+           onscripter: nscript.dat / nsa / sar 包,及散装字体图片\n\n
         4. 操作手势 \n
            [单击] 鼠标左键\n
-           [双指] 鼠标右键\n
-           [三指] 呼出菜单\n\n
+           [双指轻点] 鼠标右键\n
+           [双指上下滑] 滚轮（回想/翻页）\n
+           [三指轻点] 鼠标右键/菜单\n
+           [长按拖动] 按住左键拖动\n\n
         5. 历史记录 \n
            自动记录最近游玩的游戏\n
            可查看游玩次数和时间
@@ -40,7 +44,7 @@
     <string name="warning_invalid_title">警告：游戏目录不完整</string>
     <string name="warning_read">目录不可读</string>
     <string name="warning_write">目录不可写</string>
-    <string name="warning_no_data">未找到 data.xp3 / root.pfs / system.ini</string>
+    <string name="warning_no_data">未找到 data.xp3 / root.pfs / system.ini / nscript.dat / *.nsa</string>
     <string name="dialog_confirm_launch">是否仍然启动？</string>
     <string name="btn_launch">启动</string>
     <string name="btn_cancel">取消</string>

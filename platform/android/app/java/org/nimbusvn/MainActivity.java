@@ -100,14 +100,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 同一个 APK 内的两个内核：
+     * 同一个 APK 内的三个内核：
      *   KRKR         = krkrsdl3（XP3 包 + TJS 脚本，原生库 libkrkrsdl3.so）
      *   OPENARTEMIS  = openartemis（PFS 包/解包工程，原生库 libopenartemis.so）
+     *   ONSCRIPTER   = onscripter（nscript.dat + nsa/sar 包，原生库 libonscripter.so）
      * 启动器按游戏目录内容自动识别，单人配置可用 engine 覆盖。
      */
     public enum Engine {
         KRKR("krkr", "XP3"),
-        OPENARTEMIS("openartemis", "PFS");
+        OPENARTEMIS("openartemis", "PFS"),
+        ONSCRIPTER("onscripter", "ONS");
 
         public final String id;
         public final String badge;
@@ -126,13 +128,19 @@ public class MainActivity extends AppCompatActivity {
             if (v.equals("openartemis") || v.equals("artemis") || v.equals("pfs")) {
                 return OPENARTEMIS;
             }
+            if (v.equals("ons") || v.equals("onscripter") || v.equals("nscripter")
+                    || v.equals("nscript")) {
+                return ONSCRIPTER;
+            }
             return null;
         }
     }
 
-    /** 各内核缺省启动文件。 */
+    /** 各内核缺省启动文件（ONS 的启动脚本由引擎在游戏目录里自行探测）。 */
     private static String defaultStartup(Engine engine) {
-        return engine == Engine.OPENARTEMIS ? "root.pfs" : "data.xp3";
+        if (engine == Engine.OPENARTEMIS) return "root.pfs";
+        if (engine == Engine.ONSCRIPTER) return "nscript.dat";
+        return "data.xp3";
     }
 
     // ========== 游戏信息类 ==========
@@ -257,6 +265,14 @@ public class MainActivity extends AppCompatActivity {
                             has_script = true;
                             break;
                         }
+                    } else if (engine == Engine.ONSCRIPTER) {
+                        // onscripter 的数据源:NScript 脚本,或任意 nsa/sar 封包
+                        // （arc.nsa / nscript.dat 是绝大多数 ONS 游戏的标准布局）。
+                        if (lower.equals("nscript.dat") || lower.equals("nscript.___")
+                                || lower.endsWith(".nsa") || lower.endsWith(".sar")) {
+                            has_script = true;
+                            break;
+                        }
                     } else {
                         // krkrsdl3 的数据源:XP3 包或 TJS 启动脚本。
                         if (lower.endsWith(".xp3") || lower.equals("startup.tjs")) {
@@ -282,16 +298,22 @@ public class MainActivity extends AppCompatActivity {
             File dir = new File(m_path);
             String[] list = dir.isDirectory() ? dir.list() : null;
             if (list != null) {
-                boolean xp3 = false, pfs = false, tjs = false, ini = false;
+                boolean xp3 = false, pfs = false, tjs = false, ini = false, ons = false;
                 for (String name : list) {
                     String lower = name.toLowerCase(Locale.US);
                     if (lower.endsWith(".xp3")) xp3 = true;
                     else if (lower.endsWith(".pfs")) pfs = true;
                     else if (lower.equals("startup.tjs")) tjs = true;
                     else if (lower.equals("system.ini")) ini = true;
+                    else if (lower.equals("nscript.dat") || lower.equals("nscript.___")
+                            || lower.endsWith(".nsa") || lower.endsWith(".sar")) ons = true;
                 }
+                // 判定顺序即优先级：XP3/TJS > PFS/system.ini > ONS。
+                // ONS 的目录有时也带别的引擎残留文件，放在最后避免误判；
+                // 反过来 krkr 目录里若混进 .nsa 也不会被当成 ONS。
                 if (xp3 || tjs) return Engine.KRKR;
                 if (pfs || ini) return Engine.OPENARTEMIS;
+                if (ons) return Engine.ONSCRIPTER;
             }
             // 目录里没有任何标志文件时按 krkrsdl3 处理（历史行为）。
             return Engine.KRKR;
@@ -1434,7 +1456,8 @@ public class MainActivity extends AppCompatActivity {
      *  - 已经到 maxDepth：按 isGameCandidateDeep 判定后收入
      *    （深度 = 1 时退回旧行为：子目录全收，坏目录靠红色徽标提示）
      *  - 还没到 maxDepth：
-     *      · 子目录里有游戏标志文件（.xp3 / .pfs / startup.tjs / system.ini）→ 当作游戏本体，不再往里钻
+     *      · 子目录里有游戏标志文件（.xp3 / .pfs / startup.tjs / system.ini /
+     *        nscript.dat / .nsa）→ 当作游戏本体，不再往里钻
      *      · 没有标志文件 → 当作"装着游戏的总目录"（比如 data/），继续往下找
      *      · 钻完了但一个游戏都没找到 → 把这个总目录自己也当候选，免得目录在列表里凭空消失
      */
@@ -1512,7 +1535,11 @@ public class MainActivity extends AppCompatActivity {
             if (lower.endsWith(".xp3")
                     || lower.endsWith(".pfs")
                     || lower.equals("startup.tjs")
-                    || lower.equals("system.ini")) {
+                    || lower.equals("system.ini")
+                    || lower.equals("nscript.dat")
+                    || lower.equals("nscript.___")
+                    || lower.endsWith(".nsa")
+                    || lower.endsWith(".sar")) {
                 return true;
             }
         }
@@ -1620,15 +1647,28 @@ public class MainActivity extends AppCompatActivity {
      *
      *   krkrsdl3（XP3/TJS）: <startup> [--save-dir <dir>]
      *   openartemis（PFS）:  <startup> --platform android|windows
+     *   onscripter（ONS）:   <游戏目录> [其它选项]
      *
      * 渲染器不在这里指定：用哪个后端由内核自己的缺省值决定，
      * 需要覆盖时在单人配置的启动参数里手写（-render=gl / --renderer gles 等）。
      *
      * 单人配置可覆盖：startup_file（数据源）、engine、platform、scopedsavedir；
-     * 如果设置了 custom args，则完全替换全局配置生成的其他参数。
+     * custom args 替换全局选项，但 Artemis 的 platform 仍会单独传入。
      */
     private ArrayList<String> buildLaunchArgs(String gamedir, JSONObject gameConfig, Engine engine) {
         ArrayList<String> args = new ArrayList<>();
+
+        // ⓪ ONScripter 不接受"启动文件名"：游戏目录是第一参数，脚本
+        //    （nscript.dat / nscript.___）与 nsa/sar 封包由引擎在该目录里
+        //    自行探测。隔离存档的 --save-dir 在 startGame 里统一追加。
+        if (engine == Engine.ONSCRIPTER) {
+            args.add(gamedir);
+            if (gameConfig != null) {
+                String ca = gameConfig.optString("args", "");
+                if (!ca.isEmpty()) args.addAll(cmdToArgs(ca));
+            }
+            return args;
+        }
 
         // ① 首参数：启动文件（各内核有自己的缺省名）。
         String startupFile = defaultStartup(engine);
@@ -1641,42 +1681,43 @@ public class MainActivity extends AppCompatActivity {
         }
         args.add(startupFile);
 
-        // ② 如果游戏有自定义 args，直接用（跳过下方全局配置）
+        // ② 单游戏自定义参数：只替换参数部分，不吞掉 Artemis 的平台段。
+        boolean hasCustomArgs = false;
         if (gameConfig != null) {
             String ca = gameConfig.optString("args", "");
             if (!ca.isEmpty()) {
                 args.addAll(cmdToArgs(ca));
-                return args;
+                hasCustomArgs = true;
             }
         }
 
-        // ③ 合并全局配置中的各项参数
-        try {
-            if (engine == Engine.OPENARTEMIS) {
-                // 平台段：决定 system.ini 里的 [android]/[windows] 段与脚本 os 判定。
-                String platform = null;
-                if (gameConfig != null && gameConfig.has("platform")) {
-                    platform = gameConfig.optString("platform", "android");
-                } else if (m_gameargs != null) {
-                    platform = m_gameargs.optString("platform", "android");
+        // ③ 引擎能力表声明的选项（krkr 的 -render、artemis 的 --renderer/--platform）。
+        EngineOptions.Profile profile = EngineOptions.forId(engine.id);
+        if (profile != null) {
+            for (EngineOptions.Group group : profile.groups) {
+                // 单游戏选项是权威值：清掉自定义参数里同名的旧开关，
+                // 避免“改了平台但自定义参数里还留着 --platform=windows”。
+                boolean explicit = gameConfig != null && gameConfig.has(group.key);
+                if (explicit) stripOption(args, group.cliName);
+                String value = EngineOptions.value(gameConfig, group);
+                String arg = EngineOptions.argument(group, value);
+                if (arg != null && !hasOption(args, group.cliName)) {
+                    args.add(arg);
                 }
-                if (platform == null || platform.trim().isEmpty()) platform = "android";
-                platform = platform.trim().toLowerCase(Locale.US);
-                // 只认 android / windows；非法值回落到缺省段。
-                if (!"android".equals(platform) && !"windows".equals(platform)) platform = "android";
+            }
+        }
 
-                args.add("--platform");
-                args.add(platform);
-                // 存档隔离不走 argv,由 GameActivity 在原生启动前设置
-                // OA_SAVE_ROOT 环境变量(见 buildSaveRoot)。
-            } else {
-                // 隔离存档目录
-                if (m_gameargs != null && m_gameargs.optBoolean("scopedsavedir", false)) {
-                    String savedir = buildSaveRoot(gamedir);
-                    if (savedir != null) {
-                        args.add("--save-dir");
-                        args.add(savedir);
-                    }
+        // 自定义参数已经完整表达启动参数时，不再叠加全局的隔离存档开关。
+        if (hasCustomArgs) return args;
+
+        // ④ 其余内核的全局选项（krkrsdl3 的隔离存档）。
+        try {
+            if (engine == Engine.KRKR && m_gameargs != null
+                    && m_gameargs.optBoolean("scopedsavedir", false)) {
+                String savedir = buildSaveRoot(gamedir);
+                if (savedir != null) {
+                    args.add("--save-dir");
+                    args.add(savedir);
                 }
             }
         } catch (Exception e) {
@@ -1755,12 +1796,24 @@ public class MainActivity extends AppCompatActivity {
      * mode 位:4=可读 2=可写 1=找到启动文件(checkValid)。
      *
      * openartemis 的数据源两种形态:游戏目录里的 .pfs 包,或目录本身
-     * (含 system.ini 的解包项目)；krkrsdl3 的数据源是 XP3 包/目录。
-     * 两者都走同一个 argv 首参数位置。
+     * (含 system.ini 的解包项目)；krkrsdl3 的数据源是 XP3 包/目录；
+     * onscripter 只需要目录（第一参数），脚本与封包由引擎自己探测。
      */
     private void startGame(int mode, String gamepath, ArrayList<String> args, Engine engine) {
         if (mode == 7) {
-            if (engine == Engine.OPENARTEMIS) {
+            if (engine == Engine.ONSCRIPTER) {
+                // ONS：游戏目录是第一参数，引擎在目录里找 nscript.dat / *.nsa。
+                if (args == null) args = new ArrayList<>();
+                if (args.isEmpty()) args.add(gamepath);
+                else args.set(0, gamepath);
+                // 隔离存档：--save-dir 由这里统一追加，避免和自定义参数重复。
+                String saveRoot = buildSaveRoot(gamepath);
+                if (saveRoot != null && !hasOption(args, "--save-dir")) {
+                    args.add("--save-dir");
+                    args.add(saveRoot);
+                }
+                startOns(args);
+            } else if (engine == Engine.OPENARTEMIS) {
                 File dir = new File(gamepath);
                 File pfs = new File(dir, args.isEmpty() ? defaultStartup(engine) : args.get(0));
                 String source = pfs.isFile() ? pfs.getAbsolutePath() : gamepath;
@@ -1782,7 +1835,9 @@ public class MainActivity extends AppCompatActivity {
         if ((mode & 2) == 0) message.append("⚠ 目录不可写(存档需要)\n");
         if ((mode & 1) == 0) {
             message.append("⚠ 未找到 " + defaultStartup(engine));
-            message.append(engine == Engine.OPENARTEMIS ? " / system.ini\n\n" : " / startup.tjs\n\n");
+            if (engine == Engine.OPENARTEMIS) message.append(" / system.ini\n\n");
+            else if (engine == Engine.ONSCRIPTER) message.append(" / *.nsa\n\n");
+            else message.append(" / startup.tjs\n\n");
         }
         builder.setMessage(message);
         builder.setCancelable(true);
@@ -1822,6 +1877,23 @@ public class MainActivity extends AppCompatActivity {
 
     private void startKrkrsdl3(ArrayList<String> m_gameargs) {
         startActivity(KRKRActivity.createIntent(this, m_gameargs));
+    }
+
+    private void startOns(ArrayList<String> m_gameargs) {
+        // 存档目录已经由 startGame 拼进 argv（--save-dir），这里不再重复传。
+        startActivity(ONSActivity.createIntent(this, m_gameargs, null));
+    }
+
+    /** argv 里是否已经带了某个开关（用于避免重复追加 --save-dir）。 */
+    private static void stripOption(List<String> args, String name) {
+        args.removeIf(arg -> arg.equals(name) || arg.startsWith(name + "="));
+    }
+
+    private static boolean hasOption(List<String> args, String name) {
+        for (String arg : args) {
+            if (name.equals(arg) || arg.startsWith(name + "=")) return true;
+        }
+        return false;
     }
 
     /**
@@ -2002,6 +2074,7 @@ public class MainActivity extends AppCompatActivity {
         int id = engineGroup.getCheckedRadioButtonId();
         if (id == R.id.detail_engine_krkr) return Engine.KRKR;
         if (id == R.id.detail_engine_openartemis) return Engine.OPENARTEMIS;
+        if (id == R.id.detail_engine_ons) return Engine.ONSCRIPTER;
         return autoEngine;
     }
 
@@ -2023,6 +2096,71 @@ public class MainActivity extends AppCompatActivity {
 
         text_gameargs.setText(updated);
         saveArgsConfig(gameinfo.m_path, updated, engine);
+    }
+
+    /**
+     * 按当前引擎的能力表重建“单游戏选项”表单。
+     * 以后新增引擎/选项只需要改 EngineOptions，不用再改这里。
+     */
+    private void rebuildDetailOptions(LinearLayout container, Engine engine, JSONObject config) {
+        container.removeAllViews();
+        EngineOptions.Profile profile = EngineOptions.forId(engine.id);
+        if (profile == null || profile.groups.isEmpty()) {
+            container.setVisibility(View.GONE);
+            return;
+        }
+        container.setVisibility(View.VISIBLE);
+
+        int topMargin = (int) (6 * getResources().getDisplayMetrics().density);
+        for (EngineOptions.Group group : profile.groups) {
+            TextView label = new TextView(this);
+            label.setText(group.label);
+            label.setTextSize(12);
+            label.setTextColor(getResources().getColor(R.color.text_secondary));
+            LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            labelParams.topMargin = topMargin;
+            container.addView(label, labelParams);
+
+            RadioGroup row = new RadioGroup(this);
+            row.setOrientation(RadioGroup.HORIZONTAL);
+            row.setTag(group.key);
+
+            String selected = EngineOptions.value(config, group);
+            for (EngineOptions.Choice choice : group.choices) {
+                RadioButton button = new RadioButton(this);
+                button.setId(View.generateViewId());
+                button.setText(choice.label);
+                button.setTextSize(12);
+                button.setTextColor(getResources().getColor(R.color.text_secondary));
+                button.setTag(choice.id);
+                row.addView(button);
+                if (choice.id.equals(selected)) row.check(button.getId());
+            }
+            container.addView(row);
+        }
+    }
+
+    /** 读取动态表单当前选中的 {选项键: 值}。 */
+    private JSONObject collectDetailOptions(LinearLayout container) {
+        JSONObject result = new JSONObject();
+        for (int i = 0; i < container.getChildCount(); ++i) {
+            View child = container.getChildAt(i);
+            if (!(child instanceof RadioGroup)) continue;
+            RadioGroup row = (RadioGroup) child;
+            Object key = row.getTag();
+            int checked = row.getCheckedRadioButtonId();
+            if (key == null || checked == -1) continue;
+            RadioButton button = row.findViewById(checked);
+            if (button != null && button.getTag() != null) {
+                try {
+                    result.put(key.toString(), button.getTag().toString());
+                } catch (JSONException ignored) {
+                }
+            }
+        }
+        return result;
     }
 
     // ========== 游戏详情弹窗 ==========
@@ -2076,18 +2214,24 @@ public class MainActivity extends AppCompatActivity {
         EditText text_gameargs = view_gamedetail.findViewById(R.id.text_detail_gameargs);
         TextView text_startup = view_gamedetail.findViewById(R.id.text_detail_startup);
         RadioGroup detail_engine_group = view_gamedetail.findViewById(R.id.detail_engine_group);
+        LinearLayout detail_options_container = view_gamedetail.findViewById(R.id.detail_options_container);
         ImageButton btn_browse = view_gamedetail.findViewById(R.id.button_browse_startup);
         EditText text_tags = view_gamedetail.findViewById(R.id.text_detail_tags);
 
-        // 初始化内核选择：auto / krkr / openartemis
+        // 初始化内核选择：auto / krkr / openartemis / onscripter
         Engine overrideEngine = Engine.fromId(gameConfig.optString("engine", ""));
         if (overrideEngine == Engine.KRKR) {
             detail_engine_group.check(R.id.detail_engine_krkr);
         } else if (overrideEngine == Engine.OPENARTEMIS) {
             detail_engine_group.check(R.id.detail_engine_openartemis);
+        } else if (overrideEngine == Engine.ONSCRIPTER) {
+            detail_engine_group.check(R.id.detail_engine_ons);
         } else {
             detail_engine_group.check(R.id.detail_engine_auto);
         }
+
+        // 按引擎能力表生成单游戏选项（后端/平台等）。
+        rebuildDetailOptions(detail_options_container, detectedEngine, gameConfig);
 
         // 初始化参数显示
         String initialMergedCmd = buildDisplayString(gameConfig, detectedEngine);
@@ -2134,8 +2278,9 @@ public class MainActivity extends AppCompatActivity {
         // 内核切换 → 缺省启动文件跟着换，并刷新参数显示
         detail_engine_group.setOnCheckedChangeListener((g, id) -> {
             Engine engine = currentDetailEngine(detail_engine_group, autoEngine);
+            rebuildDetailOptions(detail_options_container, engine, gameConfig);
             String cur = text_startup.getText().toString();
-            if (cur.equals("root.pfs") || cur.equals("data.xp3")) {
+            if (cur.equals("root.pfs") || cur.equals("data.xp3") || cur.equals("nscript.dat")) {
                 text_startup.setText(defaultStartup(engine));
             }
             updateDetailArgsDisplay(gameinfo, text_startup, text_gameargs, engine);
@@ -2155,32 +2300,39 @@ public class MainActivity extends AppCompatActivity {
             int engineId = detail_engine_group.getCheckedRadioButtonId();
             String engineOverride = (engineId == R.id.detail_engine_krkr)
                     ? Engine.KRKR.id
-                    : (engineId == R.id.detail_engine_openartemis ? Engine.OPENARTEMIS.id : "");
+                    : (engineId == R.id.detail_engine_openartemis ? Engine.OPENARTEMIS.id
+                    : (engineId == R.id.detail_engine_ons ? Engine.ONSCRIPTER.id : ""));
 
-            // 构建当前 UI 状态的覆盖配置（保存 + 运行）
-            JSONObject saveCfg = new JSONObject();
+            // 构建当前 UI 状态（保存时以旧配置为底，避免丢 tags/args/引擎）
+            JSONObject saveCfg;
             JSONObject launchCfg = new JSONObject();
-            boolean hasOverride = false;
+            boolean hasOverride = true;
             try {
+                saveCfg = new JSONObject(gameConfig.toString());
                 String su = text_startup.getText().toString();
 
                 // 内核
                 if (!engineOverride.isEmpty()) {
                     saveCfg.put("engine", engineOverride);
-                    hasOverride = true;
+                } else {
+                    saveCfg.remove("engine");
+                }
+                // 当前引擎的单游戏选项（后端/平台等）；先清掉旧引擎的键
+                for (String key : EngineOptions.allKeys()) saveCfg.remove(key);
+                JSONObject selectedOptions = collectDetailOptions(detail_options_container);
+                for (java.util.Iterator<String> it = selectedOptions.keys(); it.hasNext(); ) {
+                    String key = it.next();
+                    saveCfg.put(key, selectedOptions.get(key));
                 }
                 // 启动文件
                 if (!su.equals(defaultStartup(launchEngine))) {
                     saveCfg.put("startup_file", su);
-                    hasOverride = true;
+                } else {
+                    saveCfg.remove("startup_file");
                 }
                 // 标签
                 String curTags = text_tags.getText().toString().trim();
-                String prevTags = gameConfig.optString("tags", "");
-                if (!curTags.equals(prevTags)) {
-                    saveCfg.put("tags", curTags);
-                    hasOverride = true;
-                }
+                saveCfg.put("tags", curTags);
                 // 参数字符串
                 if (argsEdited) {
                     String[] cp = currentCmd.split(" ", 2);
@@ -2188,9 +2340,11 @@ public class MainActivity extends AppCompatActivity {
                     String ra = cp.length > 1 ? cp[1] : "";
                     if (!ft.equals(defaultStartup(launchEngine))) {
                         saveCfg.put("startup_file", ft);
-                        hasOverride = true;
+                    } else {
+                        saveCfg.remove("startup_file");
                     }
-                    if (!ra.isEmpty()) { saveCfg.put("args", ra); hasOverride = true; }
+                    if (!ra.isEmpty()) saveCfg.put("args", ra);
+                    else saveCfg.remove("args");
                 }
 
                 // 持久化到数据库
@@ -2200,6 +2354,11 @@ public class MainActivity extends AppCompatActivity {
 
                 // 构建启动参数（始终使用 UI 当前值）
                 launchCfg.put("engine", engineOverride.isEmpty() ? "auto" : engineOverride);
+                JSONObject launchOptions = collectDetailOptions(detail_options_container);
+                for (java.util.Iterator<String> it = launchOptions.keys(); it.hasNext(); ) {
+                    String key = it.next();
+                    launchCfg.put(key, launchOptions.get(key));
+                }
                 if (!su.equals(defaultStartup(launchEngine))) launchCfg.put("startup_file", su);
                 if (argsEdited) {
                     String[] cp = currentCmd.split(" ", 2);
@@ -2285,7 +2444,6 @@ public class MainActivity extends AppCompatActivity {
     // ========== 全局配置读写 ==========
 
     private void updateGameConfig(boolean init) {
-        RadioGroup group_platform = findViewById(R.id.group_platform);
         CheckBox button_scopedsavedir = findViewById(R.id.button_scopedsavedir);
         CheckBox button_alloweditargs = findViewById(R.id.button_alloweditargs);
 
@@ -2299,24 +2457,11 @@ public class MainActivity extends AppCompatActivity {
                 // 指定时才生效，这里顺手清掉，免得以后看配置时误以为还管用。
                 if (m_gameargs.has("render")) m_gameargs.remove("render");
 
-                // 平台段：决定 system.ini 读哪一段（[android] / [windows]），
-                // 同时参与脚本侧的 os 判定。Android 包默认 android。
-                String platform = m_gameargs.optString("platform", "android");
-                if ("windows".equals(platform)) {
-                    group_platform.check(R.id.button_platform_windows);
-                } else {
-                    group_platform.check(R.id.button_platform_android);
-                }
-
+                // 平台段已改成每个游戏自己的选项（详情页），全局不再保存。
                 button_scopedsavedir.setChecked(m_gameargs.optBoolean("scopedsavedir", false));
                 button_alloweditargs.setChecked(m_gameargs.optBoolean("alloweditargs", false));
             } else {
                 if (m_gameargs == null) m_gameargs = new JSONObject();
-
-                // 平台段
-                int platformId = group_platform.getCheckedRadioButtonId();
-                m_gameargs.put("platform",
-                        (platformId == R.id.button_platform_windows) ? "windows" : "android");
 
                 m_gameargs.put("scopedsavedir", button_scopedsavedir.isChecked());
                 m_gameargs.put("alloweditargs", button_alloweditargs.isChecked());

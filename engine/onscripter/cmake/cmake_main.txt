@@ -1,0 +1,135 @@
+# ---------------------------------------------------------------------------
+# ONScripter 内核（engine/onscripter）的构建接线。
+#
+# 目标：
+#   libonscripter — 引擎静态库（ons 逻辑 + core 基础设施 + media 自研媒体层）
+#   onscripter    — 宿主（桌面/WASM 可执行文件；Android 为 libonscripter.so）
+#
+# 依赖：SDL3 核心、FreeType、libpng/libjpeg-turbo、BZip2、FFmpeg（可选）。
+# 字体、图像、混音、影片都在 media/ 内实现。
+# ---------------------------------------------------------------------------
+
+set(ONS_ROOT ${ONSCRIPTER_ROOT})
+
+if(NOT EXISTS ${ONS_ROOT}/ons/ONScripterLabel.cpp)
+    message(FATAL_ERROR "onscripter 源码缺失：${ONS_ROOT}/ons/ONScripterLabel.cpp")
+endif()
+
+file(GLOB ONS_ENGINE_SOURCES CONFIGURE_DEPENDS ${ONS_ROOT}/ons/*.cpp)
+
+file(GLOB ONS_CORE_SOURCES   CONFIGURE_DEPENDS ${ONS_ROOT}/core/*.cpp)
+file(GLOB ONS_MEDIA_SOURCES  CONFIGURE_DEPENDS ${ONS_ROOT}/media/*.cpp)
+
+add_library(libonscripter STATIC
+    ${ONS_ENGINE_SOURCES}
+    ${ONS_CORE_SOURCES}
+    ${ONS_MEDIA_SOURCES}
+    ${ONS_ROOT}/host/ons_snapshot.cpp)
+
+target_include_directories(libonscripter PUBLIC
+    ${ONS_ROOT}/ons
+    ${ONS_ROOT}/core
+    ${ONS_ROOT}/media
+    ${ONS_ROOT}/host)
+
+target_compile_definitions(libonscripter PUBLIC
+    ONS_NIMBUS=1
+    ONS_DEFAULT_ENCODING_AUTO=1)
+
+# 发行版本号唯一来源：根 CMakeLists.txt 的 NIMBUSVN_VERSION。
+# PUBLIC 让 onscripter 宿主也能用同一个字符串（--version / 启动日志）。
+if(NIMBUSVN_VERSION)
+    target_compile_definitions(libonscripter PUBLIC
+        NIMBUSVN_VERSION="${NIMBUSVN_VERSION}")
+endif()
+
+set_target_properties(libonscripter PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
+
+# ---- 依赖 -----------------------------------------------------------------
+find_package(SDL3 CONFIG REQUIRED)
+target_link_libraries(libonscripter PUBLIC SDL3::SDL3)
+
+if(NOT EMSCRIPTEN)
+    find_package(Freetype REQUIRED)
+    target_link_libraries(libonscripter PRIVATE Freetype::Freetype)
+
+    find_package(PNG REQUIRED)
+    target_link_libraries(libonscripter PRIVATE PNG::PNG)
+
+    find_package(JPEG REQUIRED)
+    target_link_libraries(libonscripter PRIVATE JPEG::JPEG)
+
+    find_package(BZip2 REQUIRED)
+    target_link_libraries(libonscripter PRIVATE BZip2::BZip2)
+
+    find_package(FFMPEG QUIET)
+    if(FFMPEG_FOUND)
+        target_compile_definitions(libonscripter PRIVATE ONS_HAVE_FFMPEG=1)
+        target_include_directories(libonscripter PRIVATE ${FFMPEG_INCLUDE_DIRS})
+        target_link_directories(libonscripter PRIVATE ${FFMPEG_LIBRARY_DIRS})
+        nimbus_link_ffmpeg(libonscripter)
+        message(STATUS "onscripter: FFmpeg audio/video backend ENABLED")
+    else()
+        message(WARNING "onscripter: FFmpeg not found — audio/video playback disabled")
+    endif()
+endif()
+
+# ---- 宿主 -----------------------------------------------------------------
+if(ANDROID)
+    add_library(onscripter SHARED ${ONS_ROOT}/host/ons_main.cpp)
+    target_link_libraries(onscripter PRIVATE libonscripter)
+    set_target_properties(onscripter PROPERTIES OUTPUT_NAME "onscripter")
+    target_link_options(onscripter PRIVATE $<$<CONFIG:Release>:-s>)
+else()
+    add_executable(onscripter ${ONS_ROOT}/host/ons_main.cpp)
+    target_link_libraries(onscripter PRIVATE libonscripter)
+
+    # 运行时 DLL 跟着 exe 走，避免 PATH 依赖；只复制本内核实际依赖的库。
+    if(WIN32 AND VCPKG_INSTALLED_DIR)
+        file(GLOB _ons_runtime_dlls
+            "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin/*.dll")
+        foreach(_dll IN LISTS _ons_runtime_dlls)
+            get_filename_component(_dll_name "${_dll}" NAME)
+            if(_dll_name MATCHES "^SDL3_(ttf|mixer|image)")
+                continue()
+            endif()
+            add_custom_command(TARGET onscripter POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${_dll}" "$<TARGET_FILE_DIR:onscripter>")
+        endforeach()
+    endif()
+endif()
+
+if(EMSCRIPTEN)
+    set_target_properties(onscripter PROPERTIES
+        SUFFIX ".html"
+        OUTPUT_NAME "index"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/onscripter")
+    target_link_options(onscripter PRIVATE
+        -lidbfs.js
+        # 页面壳自己决定何时启动：先选数据、写进 MEMFS，再 callMain()。
+        -sINVOKE_RUN=0
+        -sALLOW_MEMORY_GROWTH=1
+        -sNO_EXIT_RUNTIME=1
+        -sFORCE_FILESYSTEM=1
+        -sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall,cwrap,UTF8ToString
+        --shell-file "${CMAKE_SOURCE_DIR}/platform/emscripten/onscripter_shell.html")
+    set_property(TARGET onscripter APPEND PROPERTY
+        LINK_DEPENDS "${CMAKE_SOURCE_DIR}/platform/emscripten/onscripter_shell.html")
+endif()
+
+if(MSVC)
+    target_compile_options(libonscripter PRIVATE /utf-8)
+else()
+    target_compile_options(libonscripter PRIVATE -Wall -Wno-unused-variable -Wno-unused-but-set-variable)
+endif()
+
+# ---- 自测（桌面） ---------------------------------------------------------
+option(ONS_BUILD_TESTS "Build onscripter unit tests" OFF)
+if(ONS_BUILD_TESTS AND NOT ANDROID AND NOT EMSCRIPTEN)
+    enable_testing()
+    add_subdirectory(${ONSCRIPTER_DIR}/tests ${CMAKE_BINARY_DIR}/onscripter-tests)
+endif()

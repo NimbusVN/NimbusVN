@@ -146,6 +146,29 @@
             "binaryDir": "${sourceDir}/out/windows-oa"
         },
         {
+            "name": "Windows Config ONS",
+            "generator": "Ninja Multi-Config",
+            "cacheVariables": {
+                "WINDOWS": true,
+                "MINGW": true,
+                "CMAKE_SYSTEM_NAME": "Windows",
+                "CMAKE_MAKE_PROGRAM": "ninja",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+                "ENGINE_KRKRSDL3": false,
+                "ENGINE_OPENARTEMIS": false,
+                "ENGINE_ONSCRIPTER": true,
+                "VCPKG_INSTALLED_DIR": "${sourceDir}/out/windows/vcpkg_installed"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            },
+            "binaryDir": "${sourceDir}/out/windows-ons"
+        },
+        {
             "name": "Linux Config OA",
             "generator": "Ninja Multi-Config",
             "cacheVariables": {
@@ -164,6 +187,26 @@
                 "rhs": "Linux"
             },
             "binaryDir": "${sourceDir}/out/linux-oa"
+        },
+        {
+            "name": "Linux Config ONS",
+            "generator": "Ninja Multi-Config",
+            "cacheVariables": {
+                "LINUX": true,
+                "CMAKE_MAKE_PROGRAM": "ninja",
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+                "ENGINE_KRKRSDL3": false,
+                "ENGINE_OPENARTEMIS": false,
+                "ENGINE_ONSCRIPTER": true
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            },
+            "binaryDir": "${sourceDir}/out/linux-ons"
         },
         {
             "name": "mingw-asan-fuzz",
@@ -244,6 +287,29 @@
                 "rhs": "Darwin"
             },
             "binaryDir": "${sourceDir}/out/macos-console"
+        },
+        {
+            "name": "macOS Config ONS",
+            "generator": "Ninja Multi-Config",
+            "cacheVariables": {
+                "MACOS": true,
+                "CMAKE_SYSTEM_NAME": "Darwin",
+                "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
+                "CMAKE_OSX_ARCHITECTURES": "arm64",
+                "CMAKE_MAKE_PROGRAM": "ninja",
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+                "ENGINE_KRKRSDL3": false,
+                "ENGINE_OPENARTEMIS": false,
+                "ENGINE_ONSCRIPTER": true
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            },
+            "binaryDir": "${sourceDir}/out/macos-ons"
         },
         {
             "name": "iOS Simulator Config",
@@ -362,6 +428,21 @@
             "configuration": "Release"
         },
         {
+            "name": "Linux Release Build ONS",
+            "configurePreset": "Linux Config ONS",
+            "configuration": "Release"
+        },
+        {
+            "name": "Windows Release Build ONS",
+            "configurePreset": "Windows Config ONS",
+            "configuration": "Release"
+        },
+        {
+            "name": "Windows Debug Build ONS",
+            "configurePreset": "Windows Config ONS",
+            "configuration": "Debug"
+        },
+        {
             "name": "mingw-asan-fuzz",
             "configurePreset": "mingw-asan-fuzz"
         },
@@ -393,6 +474,11 @@
         {
             "name": "macOS Release Build Console",
             "configurePreset": "macOS Config Console",
+            "configuration": "Release"
+        },
+        {
+            "name": "macOS Release Build ONS",
+            "configurePreset": "macOS Config ONS",
             "configuration": "Release"
         },
         {

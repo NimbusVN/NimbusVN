@@ -21,7 +21,7 @@
         android:forceDarkAllowed="false"
         android:requestLegacyExternalStorage="true"
         tools:targetApi="31" >
-        <!-- 统一启动器：按游戏目录内容自动识别 XP3 / PFS 内核 -->
+        <!-- 统一启动器：按游戏目录内容自动识别 XP3 / PFS / ONS 内核 -->
         <activity
             android:name=".MainActivity"
             android:exported="true" >
@@ -40,6 +40,13 @@
         <!-- openartemis 内核：libopenartemis.so（PFS/Artemis） -->
         <activity
             android:name="org.openartemis.GameActivity"
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="screenSize|orientation|keyboardHidden">
+        </activity>
+        <!-- onscripter 内核：libonscripter.so（NScripter 脚本 + nsa/sar 包） -->
+        <activity
+            android:name="org.nimbusvn.ONSActivity"
             android:exported="true"
             android:screenOrientation="sensorLandscape"
             android:configChanges="screenSize|orientation|keyboardHidden">

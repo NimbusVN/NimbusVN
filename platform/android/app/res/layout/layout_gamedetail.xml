@@ -193,7 +193,7 @@
             android:contentDescription="浏览启动文件" />
     </LinearLayout>
 
-    <!-- 内核选择：自动识别 / krkrsdl3 (XP3) / openartemis (PFS) -->
+    <!-- 内核选择：自动识别 / krkrsdl3 (XP3) / openartemis (PFS) / onscripter (ONS) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -241,8 +241,25 @@
                 android:text="PFS"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
+
+            <RadioButton
+                android:id="@+id/detail_engine_ons"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="12dp"
+                android:text="ONS"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
         </RadioGroup>
     </LinearLayout>
+
+    <!-- 引擎选项：由 EngineOptions 的能力表动态生成（后端/平台等） -->
+    <LinearLayout
+        android:id="@+id/detail_options_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone" />
 
     <!-- 标签 -->
     <LinearLayout
