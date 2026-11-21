@@ -71,10 +71,25 @@ bool boot(oa::test::TestHost& host) {
         }
         if (!started && w && w->is_park() && w->stage_id.empty() &&
             has_key_handler(rt, "bt_start")) {
-            if (const auto p = oa::test::row_click_point(rt, "bt_start")) {
-                host.move(p->first, p->second);
+            // 标题按钮是滑入的：层和 click 行先出现，矩形还在屏幕外。点
+            // "半截在外面"的按钮时命中的是别的层（玩家也不会这么点）。
+            // 等按钮真正落进舞台再点，时序变化（转场过滤器多一拍 wait）
+            // 才不会把启动变成随机成败。
+            const oa::render::Layer* btn = nullptr;
+            for (const oa::render::Layer* l : rt.scene().draw_order()) {
+                const auto* h = rt.scene().find_event_handler(l->id, "click");
+                if (!h || !h->enabled) continue;
+                const auto it = h->params.find("key");
+                if (it != h->params.end() && it->second == "bt_start") btn = l;
+            }
+            oa::test::PlanRow row;
+            const bool on_screen =
+                btn && host.find(btn->id, &row) && row.x >= 0 && row.y >= 0 &&
+                row.x + row.w <= host.stage_w() && row.y + row.h <= host.stage_h();
+            if (btn && on_screen) {
+                host.move(row.x + row.w / 2, row.y + row.h / 2);
                 host.tick(20);
-                host.click(p->first, p->second, 3);
+                host.click(row.x + row.w / 2, row.y + row.h / 2, 3);
                 started = true;
                 host.tick(60);
                 continue;

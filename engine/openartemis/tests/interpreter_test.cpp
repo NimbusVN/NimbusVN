@@ -265,7 +265,7 @@ void test_wait_kinds() {
         run_script(it, h);
         check(h.waits == 1, "wt waits once");
         check(h.events.size() == 1 && h.events[0].kind == Event::Kind::Wait_, "wt event");
-        check(h.events[0].wait.waiting_click() && !h.events[0].wait.can(Wait::OnDecide),
+        check(h.events[0].wait.waiting_click() && !h.events[0].wait.has(Wait::WakeDecide),
               "bare wt is a click-only wait");
         check(it.variables().get("r")->as_int() == 1, "advance past wt runs next");
     }
@@ -281,7 +281,7 @@ void test_wait_kinds() {
         run_script(it, h);
         check(h.waits == 1, "wt with args waits once");
         check(h.events[0].wait.timer_ms == 500 &&
-                  !h.events[0].wait.can(Wait::OnClick),
+                  !h.events[0].wait.has(Wait::WakeClick),
               "wt time=500 input=0 stays a 500ms timer that ignores clicks");
         check(it.variables().get("r")->as_int() == 1, "advance past wt(time) runs next");
     }
@@ -291,8 +291,8 @@ void test_wait_kinds() {
         Harness h;
         it.load_script("test", "*main\n[wt0]\n");
         run_script(it, h);
-        check(h.events[0].wait.can(Wait::OnClick) &&
-                  h.events[0].wait.can(Wait::OnDecide),
+        check(h.events[0].wait.has(Wait::WakeClick) &&
+                  h.events[0].wait.has(Wait::WakeDecide),
               "wt0 accepts click and decide");
     }
     // [@] Generic
@@ -301,8 +301,8 @@ void test_wait_kinds() {
         Harness h;
         it.load_script("test", "*main\n[@]\n");
         run_script(it, h);
-        check(h.events[0].wait.can(Wait::OnDecide) &&
-                  h.events[0].wait.can(Wait::OnAuto),
+        check(h.events[0].wait.has(Wait::WakeDecide) &&
+                  h.events[0].wait.has(Wait::WakeAuto),
               "@ accepts decide and auto-mode");
     }
     // [wait time=500] input defaults 0
@@ -312,7 +312,7 @@ void test_wait_kinds() {
         it.load_script("test", "*main\n[wait time=500]\n");
         run_script(it, h);
         check(h.events[0].wait.timer_ms == 500 &&
-                  !h.events[0].wait.can(Wait::OnClick),
+                  !h.events[0].wait.has(Wait::WakeClick),
               "wait time=500 is a 500ms timer");
     }
     // [wait video=1.0] VideoLayer

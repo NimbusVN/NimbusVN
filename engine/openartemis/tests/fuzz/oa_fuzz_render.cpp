@@ -48,7 +48,6 @@ public:
         return std::nullopt;
     }
     uint64_t now_ms() const override { return 0; }
-    void post_frame_capture() override {}
     void transition_begin(const std::map<std::string, std::string>&) override {}
     void bind_text_metrics(std::function<std::tuple<double, double, double>()>) override {}
 };

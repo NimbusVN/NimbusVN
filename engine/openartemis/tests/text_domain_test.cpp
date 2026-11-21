@@ -721,13 +721,13 @@ void test_content_newline_semantics() {
         TextEngine e;
         e.push_text("a\nb");
         auto tags = e.message_tags("adv01", false);
-        check(tags.has_value() && tags->size() == 3 && (*tags)[0] == "[print data=\"a\"]" &&
-                  (*tags)[1] == "[rt]" && (*tags)[2] == "[print data=\"b\"]",
+        check(tags.has_value() && tags->size() == 3 && (*tags)[0] == "print,data,a" &&
+                  (*tags)[1] == "rt" && (*tags)[2] == "print,data,b",
               "N7 page tags split into print/rt reproduction tags");
         e.page_break(1); // rp backlog=1 → 本页入库
         auto bl = e.backlog_tags(0, false);
-        check(bl.has_value() && bl->size() == 3 && (*bl)[0] == "[print data=\"a\"]" &&
-                  (*bl)[1] == "[rt]" && (*bl)[2] == "[print data=\"b\"]",
+        check(bl.has_value() && bl->size() == 3 && (*bl)[0] == "print,data,a" &&
+                  (*bl)[1] == "rt" && (*bl)[2] == "print,data,b",
               "N7 backlog reproduction keeps the rt split");
     }
     // N8: 布局 —— LF 内容断成两行、第二行 x=0 重启、字形流无裸 LF
@@ -805,7 +805,7 @@ void test_content_newline_runtime_e2e() {
               "N10 Lua-carried LF splits at the runtime boundary");
         check(ml->char_count == 3, "N10 char_count across the runtime path");
         auto tags = t.message_tags("e2e", false);
-        check(tags.has_value() && tags->size() == 3 && (*tags)[1] == "[rt]",
+        check(tags.has_value() && tags->size() == 3 && (*tags)[1] == "rt",
               "N10 page tags reproducible after the runtime path");
     }
 }

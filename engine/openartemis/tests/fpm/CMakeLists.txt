@@ -14,6 +14,7 @@
 #   OA_BT91_PFS           ヘンタイ・プリズン
 #   OA_TEST_T5_PFS        乙女理論とその周辺 -Ecole de Paris-
 #   OA_TEST_T13_PFS       穢翼のユースティア
+#   OA_TEST_T10_PFS       私たちマリアージュ①
 #
 # 通用（asset-free）引擎测试在 tests/（../CMakeLists.txt），不在这里。
 # 资源分级：重测试默认串行（内存安全）；内存够的机器可
@@ -45,5 +46,6 @@ oa_game_test(tg3      OA_TEST_TG3_PFS)
 oa_game_test(bt91     OA_BT91_PFS)
 oa_game_test(t5       OA_TEST_T5_PFS)
 oa_game_test(t13      OA_TEST_T13_PFS)
+oa_game_test(t10      OA_TEST_T10_PFS)
 oa_game_test(hct      OA_TEST_HCT_PFS)
 oa_game_test(rr       OA_TEST_RR_PFS)

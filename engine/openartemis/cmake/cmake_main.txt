@@ -298,5 +298,7 @@ if(OA_ENABLE_FUZZ AND NOT ANDROID AND NOT EMSCRIPTEN)
             message(STATUS "openartemis: fuzz targets = brute mode (no libFuzzer runtime)")
         endif()
     endif()
-    add_subdirectory(${OA_ROOT}/tests/fuzz ${CMAKE_BINARY_DIR}/openartemis-fuzz)
+    # 测试树在 engine/openartemis/tests（与第 258 行的 ${OPENARTEMIS_DIR}/tests 同源）；
+    # OA_ROOT 指向 src/，早先这里写成 ${OA_ROOT}/tests/fuzz 在目录重构后就断了。
+    add_subdirectory(${OPENARTEMIS_DIR}/tests/fuzz ${CMAKE_BINARY_DIR}/openartemis-fuzz)
 endif()

@@ -31,6 +31,10 @@
 #include <algorithm>
 #include <functional>
 
+extern "C" {
+#include "lua.h"
+}
+
 #include "crash_backtrace.h"
 #include "test_host.h"
 #include "core/fs/physfs_fs.h"
@@ -332,6 +336,94 @@ void case_save_load(oa::test::TestHost& host) {
     check(page_moved, "text keeps changing after load");
 }
 
+// ---------------------------------------------------------------------------
+// 用例：回顾（backlog）里点"跳转"——按下必须到得了按钮
+//
+// 回归现场：旧框架把整页拖拽层 `500.0.drag` 画在 jump 按钮下面。引擎如果
+// 按"最前面的 drag 层"选拖拽目标，就会起拖拽、把这一下从按钮手里抢走，
+// 表现是 backlog 里点跳转毫无反应（按钮的 click 行一次都没执行）。
+// 正确规则：拖拽只认"指针下最前面的可交互层"（owner）；它是按钮，就派发
+// 按钮的 click，下面的 drag 层没有资格。
+// ---------------------------------------------------------------------------
+void dump_state(oa::test::TestHost& host);
+
+struct ClickSpot {
+    std::string id;
+    double cx = 0, cy = 0;
+};
+
+std::optional<ClickSpot> find_click(oa::runtime::GameRuntime& rt,
+                                    const std::function<bool(const oa::render::LayerEventHandler&)>& pred) {
+    for (const oa::render::Layer* l : rt.scene().draw_order()) {
+        const auto* h = rt.scene().find_event_handler(l->id, "click");
+        if (!h || !h->enabled || !rt.scene().is_effectively_visible(l->id)) continue;
+        if (!pred(*h)) continue;
+        double w = l->has_clip ? l->clip_w : (l->width > 0 ? l->width : 60.0);
+        double hh = l->has_clip ? l->clip_h : (l->height > 0 ? l->height : 30.0);
+        double x0 = 0, y0 = 0, rw = 0, rh = 0;
+        if (!rt.scene().world_rect(l->id, w, hh, &x0, &y0, &rw, &rh)) continue;
+        return ClickSpot{l->id, x0 + rw / 2, y0 + rh / 2};
+    }
+    return std::nullopt;
+}
+
+std::string lua_field(oa::runtime::GameRuntime& rt, const char* table, const char* field) {
+    lua_State* L = rt.interpreter().lua_bridge().state();
+    lua_getglobal(L, table);
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        return {};
+    }
+    lua_getfield(L, -1, field);
+    std::string out;
+    if (lua_isnumber(L, -1)) out = std::to_string((long long)lua_tonumber(L, -1));
+    else if (lua_isstring(L, -1)) out = lua_tostring(L, -1);
+    lua_pop(L, 2);
+    return out;
+}
+
+void case_backlog_jump(oa::test::TestHost& host) {
+    auto& rt = host.rt();
+    check(oa::test::ensure_story(rt), "story page before backlog");
+
+    // 走几页：backlog 里要有可跳的条目（否则 jump 按钮全是隐藏的）。
+    for (int i = 0; i < 8; ++i) {
+        host.key(13);
+        host.tick(30);
+    }
+
+    auto back = find_click(rt, [](const oa::render::LayerEventHandler& h) {
+        const auto it = h.params.find("key");
+        return it != h.params.end() && it->second == "bt_back";
+    });
+    check(back.has_value(), "message window has the backlog button");
+    if (!back) return;
+    host.move(back->cx, back->cy);
+    host.tick(20);
+    host.click(back->cx, back->cy, 2);
+    host.tick(90);
+
+    auto jump = find_click(rt, [](const oa::render::LayerEventHandler& h) {
+        const auto it = h.params.find("key");
+        return it != h.params.end() && it->second.rfind("jump", 0) == 0;
+    });
+    check(jump.has_value(), "backlog shows a jump button");
+    if (!jump) {
+        dump_state(host);
+        return;
+    }
+
+    std::fprintf(stderr, "[bl] jump button %s at %.0f,%.0f\n", jump->id.c_str(), jump->cx, jump->cy);
+    host.move(jump->cx, jump->cy);
+    host.tick(20);
+    host.click(jump->cx, jump->cy, 2);
+    host.tick(60);
+
+    // 点中 = btn_click -> log_click("jump") -> goBacklogJump 记下目标并弹确认框。
+    const std::string no = lua_field(rt, "flg", "blogno");
+    check(!no.empty(), "one click on the jump button reaches the backlog handler");
+}
+
 void dump_state(oa::test::TestHost& host) {
     for (const auto& [id, mlp] : host.rt().text().all_layers()) {
         const auto& ml = *mlp;
@@ -381,9 +473,15 @@ int main() {
 
     check(boot(host), "boot: title -> language -> intro -> story");
     std::fprintf(stderr, "[jt] first page='%s'\n", sample(host).c_str());
+    // 诊断：OA_JOURNEY_STORY_SHOT=<dir> 时把第一张剧情页落盘（对话框回归取证）。
+    if (const char* dir = std::getenv("OA_JOURNEY_STORY_SHOT")) {
+        const std::string path = std::string(dir) + "/nekomiko_story.png";
+        if (host.save_png(path)) std::printf("[shot] %s\n", path.c_str());
+    }
     case_ui_toggle(host);
     case_save_ui_keeps_scene(host);
     case_save_load(host);
+    case_backlog_jump(host);
 
     if (const char* dir = std::getenv("OA_JOURNEY_SHOT")) {
         const std::string path = std::string(dir) + "/nekomiko_after_load.png";

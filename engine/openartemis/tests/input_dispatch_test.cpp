@@ -379,10 +379,14 @@ void test_rt_penetration_click_order() {
     h.run_lua(kHandlers);
     h.tick(140, 140, true, true); // inside all three
     const std::string log = h.lua_string("oa_log");
-    // top only + penetration lower, reversed -> lower then top; mid (no
-    // penetration) skipped.
-    check(log.find("click:k_low:1;click:k_top:1;") != std::string::npos,
-          "RT3 click order bottom->top among {low(pen), top}; mid skipped");
+    // top first, then the penetrating lower row; mid (no penetration) skipped.
+    //
+    // 顺序必须是**从上往下**：盖在页面上的对话框按钮才是玩家点的那个。
+    // 反过来（下→上）时，压在对话框底下的页面按钮会先把共享槽
+    // （框架的 `t.button_data`）写成自己的值，对话框按钮的 [call pushed]
+    // 再读就串了 —— 点"确定"反而跳到下层按钮的标签。
+    check(log.find("click:k_top:1;click:k_low:1;") != std::string::npos,
+          "RT3 click order top->bottom among {low(pen), top}; mid skipped");
     check(log.find("k_mid") == std::string::npos, "RT3 non-penetrating middle skipped");
 }
 
@@ -469,7 +473,7 @@ void test_rt_layer_click_swallows_wait_click() {
     for (int i = 0; i < 3; ++i) h.tick(80, 80);
     check(h.rt->current_wait() != nullptr &&
               h.rt->current_wait()->timed() &&
-              h.rt->current_wait()->can(oa::runtime::Wait::OnClick),
+              h.rt->current_wait()->has(oa::runtime::Wait::WakeClick),
           "RT7 parked on the clickable wait");
     h.tick(80, 80, true, true); // click handled by the top layer
     check(h.rt->current_wait() != nullptr, "RT7 handled layer click swallows the wait click");

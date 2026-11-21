@@ -142,15 +142,15 @@ void test_backlog_archive() {
     auto tags = e.backlog_tags(0, false);
     check(tags.has_value(), "U6 page 0 tags available");
     if (tags) {
-        check((*tags)[0] == "[print data=\"こんにちは\"]", "U6 text tag first");
-        check((*tags)[1] == "[font color=\"FF0000\"]", "U6 font tag kept");
-        check((*tags)[2] == "[rt]", "U6 rt tag kept");
-        check((*tags)[3] == "[print data=\"次\"]", "U6 second text tag");
+        check((*tags)[0] == "print,data,こんにちは", "U6 text tag first");
+        check((*tags)[1] == "font,color,FF0000", "U6 font tag kept");
+        check((*tags)[2] == "rt", "U6 rt tag kept");
+        check((*tags)[3] == "print,data,次", "U6 second text tag");
     }
     auto allfont = e.backlog_tags(0, true);
     check(allfont && allfont->size() == 5 &&
-              (*allfont)[0].rfind("[font ", 0) == 0 &&
-              (*allfont)[0].find("size=\"40\"") != std::string::npos,
+              (*allfont)[0].rfind("font,", 0) == 0 &&
+              (*allfont)[0].find(",size,40") != std::string::npos,
           "U6 allfont prepends the page-start font");
     // rp backlog=0/1 参数无视 write_mode
     TextEngine e2;
@@ -161,13 +161,14 @@ void test_backlog_archive() {
     e2.push_text("y");
     e2.page_break(1);
     check(e2.backlog_size() == 1, "U7 rp backlog=1 stores");
-    // allow=0 不入库；includefont=0 剥字体
+    // allow=0 只关引擎内蔵のバックログ UI（自前 UI のゲームが必ず呼ぶ）。
+    // 記録は [writebacklog] が唯一のスイッチなので、allow=0 でも入库する。
     TextEngine e3;
     e3.set_backlog_write_mode(true);
     e3.apply_backlog_config(tag({{"allow", "0"}}), false);
     e3.push_text("a");
     e3.page_break(std::nullopt);
-    check(e3.backlog_size() == 0, "U7 backlog allow=0 drops the page");
+    check(e3.backlog_size() == 1, "U7 backlog allow=0 keeps recording (UI-only switch)");
     TextEngine e4;
     e4.set_backlog_write_mode(true);
     e4.apply_backlog_config(tag({{"includefont", "0"}}), false);
@@ -175,7 +176,7 @@ void test_backlog_archive() {
     e4.push_text("b");
     e4.page_break(std::nullopt);
     auto t4 = e4.backlog_tags(0, false);
-    check(t4 && t4->size() == 1 && (*t4)[0] == "[print data=\"b\"]",
+    check(t4 && t4->size() == 1 && (*t4)[0] == "print,data,b",
           "U7 includefont=0 strips font tags");
     // clear=1
     e4.apply_backlog_config(tag({}), true);
@@ -192,15 +193,15 @@ void test_message_tags() {
     auto tags = e.message_tags("adv01", false);
     check(tags.has_value(), "U8 message tags available");
     if (tags) {
-        check((*tags)[0] == "[print data=\"あい\"]", "U8 text first");
-        check((*tags)[1] == "[rt]", "U8 rt present");
-        check((*tags)[2] == "[font color=\"FF0000\"]", "U8 font tag present");
-        check((*tags)[3] == "[print data=\"うえ\"]", "U8 second text");
+        check((*tags)[0] == "print,data,あい", "U8 text first");
+        check((*tags)[1] == "rt", "U8 rt present");
+        check((*tags)[2] == "font,color,FF0000", "U8 font tag present");
+        check((*tags)[3] == "print,data,うえ", "U8 second text");
     }
     auto allfont = e.message_tags("adv01", true);
     check(allfont && !allfont->empty() &&
-              (*allfont)[0].rfind("[font ", 0) == 0 &&
-              (*allfont)[0].find("size=\"40\"") != std::string::npos,
+              (*allfont)[0].rfind("font,", 0) == 0 &&
+              (*allfont)[0].find(",size,40") != std::string::npos,
           "U8 allfont prepends page-start font");
     check(!e.message_tags("nope", false).has_value(), "U8 unknown layer -> none");
     e.page_break(std::nullopt);

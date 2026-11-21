@@ -184,16 +184,16 @@ void test_engine_integration() {
         {{"system", "get_backlog_tags"}, {"name", "t.bl"}, {"page", "0"}, {"allfont", "1"}}));
     check(var_int(it, "t.bl.size") == 5, "V4 archived page size 5");
     const auto b0 = var_str(it, "t.bl.0");
-    check(b0 && b0->rfind("[font ", 0) == 0 && b0->find("size=\"40\"") != std::string::npos,
+    check(b0 && b0->rfind("font,", 0) == 0 && b0->find(",size,40") != std::string::npos,
           "V4 allfont prepends page-start font");
     const auto b1 = var_str(it, "t.bl.1");
-    check(b1 && *b1 == "[print data=\"こんにちは\"]", "V4 first print tag");
+    check(b1 && *b1 == "print,data,こんにちは", "V4 first print tag");
     const auto b2 = var_str(it, "t.bl.2");
     check(b2 && b2->find("FF0000") != std::string::npos, "V4 font tag kept");
     const auto b3 = var_str(it, "t.bl.3");
-    check(b3 && *b3 == "[rt]", "V4 rt tag kept");
+    check(b3 && *b3 == "rt", "V4 rt tag kept");
     const auto b4 = var_str(it, "t.bl.4");
-    check(b4 && *b4 == "[print data=\"次\"]", "V4 second print tag");
+    check(b4 && *b4 == "print,data,次", "V4 second print tag");
 
     it.apply_var(tag({{"system", "get_backlog_tags"}, {"name", "t.o"}, {"page", "5"}}));
     check(var_int(it, "t.o.size") == 0, "V4 engine out-of-range page size=0");
@@ -205,7 +205,7 @@ void test_engine_integration() {
     it.apply_var(tag({{"system", "get_message_tags"}, {"name", "t.m"}, {"id", "adv01"}}));
     check(var_int(it, "t.m.size") == 1, "V4 new-page message tag size");
     const auto m0 = var_str(it, "t.m.0");
-    check(m0 && *m0 == "[print data=\"次ページ\"]", "V4 message tag content");
+    check(m0 && *m0 == "print,data,次ページ", "V4 message tag content");
     it.apply_var(tag({{"system", "get_message_tags"}, {"name", "t.u"}, {"id", "nope"}}));
     check(var_int(it, "t.u.size") == 0, "V4 unknown layer size=0");
 }

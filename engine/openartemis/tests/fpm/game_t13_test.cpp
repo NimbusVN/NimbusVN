@@ -11,6 +11,10 @@
 #include <string>
 #include <vector>
 
+extern "C" {
+#include "lua.h"
+}
+
 #include "crash_backtrace.h"
 #include "test_host.h"
 
@@ -154,6 +158,11 @@ void case_pages(oa::test::TestHost& host) {
     check(oa::test::ensure_story(host.rt(), 6000), "stay on a story page");
     check(!sample(host).empty(), "page carries text");
     check(advance_pages(host, 3) >= 3, "advances across 3 pages");
+    // 诊断：翻过几页后的对话框取帧（文本区/折行回归取证）。
+    if (const char* dir = std::getenv("OA_T13_SHOT")) {
+        const std::string path = std::string(dir) + "/t13_dialogue.png";
+        if (host.save_png(path)) std::printf("[shot] %s\n", path.c_str());
+    }
 }
 
 /// 用例：开存档界面 → 右键关 → 再开（图层反复重建）。
@@ -280,6 +289,123 @@ void case_save_load_ui(oa::test::TestHost& host) {
     check(moved, "pages keep turning after loading");
 }
 
+// ---------------------------------------------------------------------------
+// 用例：消息窗（对话框下面那排）的 auto / skip / emergency 三个按钮
+//
+// 玩家报的"三个按钮都没反应"，其实是三条独立的断链：
+//
+//  1. auto      —— 框架的 automode_start 先写 [automode allow="0"]，再发
+//                  [exec command="automode" mode="1"]。引擎把 allow 当成
+//                  "禁止启动"，于是 automode 永远开不起来；Lua 侧却已经把
+//                  adv.automode.flag 置 true —— 看上去就是"按了没反应"。
+//                  allow 只该拦玩家的键位（role 9/12），脚本的 exec 不拦。
+//  2. skip      —— 引擎没有已读状态：s.status.alreadyread 恒 0，框架的
+//                  mw_skip_lock() 把 skip 按钮 disable（未读页不许跳过，
+//                  这是原版行为）。没有已读表 ⇒ 按钮永远灰着 ⇒ 点了没反应。
+//  3. emergency —— [avoid file=...] 与 keyconfig role 15/16 没接。框架的
+//                  vsync 靠 s.status.avoid 判"回避中"，而引擎从不设它。
+//
+// 用例走完整玩家路径：点按钮 → 看引擎状态（不是看 Lua 自报的 flag）。
+// ---------------------------------------------------------------------------
+std::string lua_eval(oa::runtime::GameRuntime& rt, const char* code) {
+    try {
+        rt.interpreter().lua_bridge().run_code(code, "fpm_t13_bar");
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[t13-bar] lua error: %s\n", e.what());
+        return std::string();
+    }
+    lua_State* L = rt.interpreter().lua_bridge().state();
+    lua_getglobal(L, "_zz");
+    std::string out;
+    if (lua_isstring(L, -1)) out = lua_tostring(L, -1);
+    lua_pop(L, 1);
+    return out;
+}
+
+bool overlay_row(oa::test::TestHost& host) {
+    for (const oa::test::PlanRow& row : host.plan()) {
+        if (row.id == "@video_overlay" && row.has_texture && row.opacity > 0.0) return true;
+    }
+    return false;
+}
+
+void case_message_buttons(oa::test::TestHost& host) {
+    auto& rt = host.rt();
+    check(oa::test::ensure_story(rt, 6000), "story page for the message-window bar");
+    for (int i = 0; i < 120 && !host.has_button("auto"); ++i) {
+        host.key(13);
+        host.tick(4);
+    }
+    check(host.has_button("auto"), "auto button is on the bar");
+    check(host.has_button("emaegency"), "emergency button is on the bar");
+
+    // 已读表：正文一显示，这一行就要进表（skip 的 enable 依据它）。
+    const std::string* script = rt.interpreter().current_script();
+    // 既読表は *表示した Text 行* を覚える。ここでの current_line は既に
+    // その先の待ちタグなので、脚本に 1 行でも入っていれば良い。
+    bool read_any = false;
+    if (script) {
+        const auto& db = rt.interpreter().read_lines();
+        const auto it = db.find(*script);
+        read_any = it != db.end() && !it->second.empty();
+    }
+    check(read_any, "the printed line is recorded as read");
+    // 既読表は存档域（g.readlines）から復元されるので、"0 固定"ではなく
+    // "0/1 を公開している"ことを見る（同じ存档根で再走すると 1 になる）。
+    const std::string alreadyread = lua_eval(rt, "_zz=e:var('s.status.alreadyread')");
+    check(alreadyread == "0" || alreadyread == "1",
+          "alreadyread is published to the framework");
+
+    // ---- auto：开 → 自己翻页 → 点一下停 ----
+    const std::string script0 = script ? *script : std::string();
+    const size_t line0 = rt.interpreter().current_line();
+    check(host.click_key("auto"), "click auto");
+    host.tick(40);
+    check(rt.automode_active(), "auto starts the engine automode");
+    bool moved = false;
+    for (int i = 0; i < 600 && !moved; ++i) {
+        host.tick(4);
+        const std::string* cs = rt.interpreter().current_script();
+        moved = (cs ? *cs : std::string()) != script0 ||
+                rt.interpreter().current_line() != line0;
+    }
+    check(moved, "auto advances the story by itself");
+    host.click(640, 300, 2); // 玩家点一下屏幕
+    host.tick(60);
+    check(!rt.automode_active(), "a click stops automode (stopbyclick)");
+
+    // ---- skip：未读页上框架自己会 disable；允许跳过未读后必须真的跳 ----
+    // 走框架自己的按钮刷新路径（system_btnon → mw_skip_lock），不伪造 clip。
+    lua_eval(rt, "sys.conf.messkip = 1; scr.adv.aread = 1; "
+                 "if system_btnon then system_btnon(true) end");
+    host.tick(30);
+    check(host.click_key("skip"), "click skip");
+    host.tick(40);
+    check(rt.skip_active(), "skip starts the engine skip");
+
+    // ---- emergency：全屏回避图 + s.status.avoid，退出键恢复 ----
+    // （start_avoid 会先把 skip/auto 停掉。）
+    check(host.click_key("emaegency"), "click emergency");
+    host.tick(40);
+    check(lua_eval(rt, "_zz=e:var('s.status.avoid')") == "1",
+          "emergency raises s.status.avoid");
+    check(overlay_row(host), "the scramble image draws on the topmost slot");
+    // 回避中は物語を進めない（文字送りは続くので、比較は「脚本位置」で見る）。
+    const std::string* avoid_script = rt.interpreter().current_script();
+    const std::string script_at = avoid_script ? *avoid_script : std::string();
+    const size_t line_at = rt.interpreter().current_line();
+    host.tick(120);
+    const std::string* still_script = rt.interpreter().current_script();
+    check((still_script ? *still_script : std::string()) == script_at &&
+              rt.interpreter().current_line() == line_at,
+          "the story stays put while avoid is up");
+    host.click(640, 360, 2); // role 16 的退出键里含左键
+    host.tick(60);
+    check(lua_eval(rt, "_zz=e:var('s.status.avoid')") == "0",
+          "the exit click leaves the avoid screen");
+    check(!overlay_row(host), "the scramble image is gone");
+}
+
 } // namespace
 
 int main() {
@@ -302,10 +428,16 @@ int main() {
         return 77;
     }
     std::fprintf(stderr, "[t13] first page='%s'\n", sample(host).c_str());
+    // 诊断：OA_T13_SHOT=<dir> 时把第一张剧情页落盘（文本区/折行回归取证）。
+    if (const char* dir = std::getenv("OA_T13_SHOT")) {
+        const std::string path = std::string(dir) + "/t13_story.png";
+        if (host.save_png(path)) std::printf("[shot] %s\n", path.c_str());
+    }
 
     case_pages(host);
     case_ui_toggle(host);
     case_save_load_ui(host);
+    case_message_buttons(host);
 
     if (failures) {
         std::printf("t13: %d failure(s)\n", failures);

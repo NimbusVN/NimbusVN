@@ -32,6 +32,7 @@
 
 #include "core/fs/fs.h"
 #include "core/runtime/runtime_save.h"
+#include "core/util/binary_stream.h"
 #include "core/render/layer.h"
 #include "core/render/renderer.h"
 #include "core/media/image.h"
@@ -136,6 +137,10 @@ struct Harness {
     void run_lua(const char* code) {
         rt->interpreter().lua_bridge().run_code(code, "save_compat_test");
     }
+    /// 以引擎事件处理器的签名 (e, param) 调用一个 Lua 全局函数。
+    void call_lua(const char* fn) {
+        (void)rt->interpreter().lua_bridge().call_function(fn, {});
+    }
     const oa::render::Layer* layer(const std::string& id) const { return rt->scene().find(id); }
     bool has_layer(const std::string& id) const { return layer(id) != nullptr; }
     size_t count_layer(const std::string& id) const {
@@ -152,7 +157,7 @@ struct Harness {
         if (w->on_reveal_done) return "scenario";
         if (!w->keys.empty()) return "key";
         // 点击停驻：[wt0] 认 decide，[wt] 只认物理点击。
-        if (w->waiting_click()) return w->can(oa::runtime::Wait::OnDecide) ? "wt0" : "wt";
+        if (w->waiting_click()) return w->has(oa::runtime::Wait::WakeDecide) ? "wt0" : "wt";
         return "?";
     }
     std::pair<std::string, size_t> pos() const {
@@ -606,7 +611,9 @@ void test_events_emitted_during_load_dispatch_survive() {
     // type=1 + 100ms: the transition stays in progress, so "the event survived
     // the load dispatch" is observable through the renderer state (the host
     // frame drains events, so drain_events() is empty by design).
-    h.run_lua("function restore(e, p) e:tag{\"trans\", type=\"1\", time=\"100\", input=\"0\"} end\n");
+    h.run_lua("function restore(e, p) e:tag{\"trans\", type=\"1\", time=\"100\", input=\"0\"} end\n"
+              "function oa_install(e) e:setEventHandler{['onLoad']='restore'} end\n");
+    h.call_lua("oa_install");
     auto d = scene_fixture({lay("s9scene", props({{"file", "s.png"}}))}, 1 /* [stop] */);
     h.install("s9.dat", d);
     h.tick();
@@ -656,12 +663,37 @@ void test_save_thumb_cache_invalidation() {
 
 } // namespace
 
+// 旧档的未知键（上一轮 PageVisual 方案写出的 `visual` 段）必须被 decode
+// 跳过，不能崩、不能影响已知字段。
+void test_legacy_unknown_visual_key() {
+    using oa::util::Writer;
+    Writer w;
+    w.map_begin(5);
+    w.str("local_variables");
+    w.map_begin(0);
+    w.str("current_script");
+    w.str("story.iet");
+    w.str("current_line");
+    w.i64(7);
+    w.str("call_stack");
+    w.array_begin(0);
+    w.str("visual");
+    w.map_begin(1);
+    w.str("page");
+    w.str("stale-page-state");
+    const oa::runtime::SaveData d = oa::runtime::SaveData::decode(w.data());
+    check(d.current_script == "story.iet" && d.current_line == 7,
+          "legacy 'visual' key is ignored (old saves still decode)");
+    check(d.page_meswindow.empty(), "legacy save leaves page_meswindow empty");
+}
+
 int main() {
     test_missing_parent_and_unresolvable_file();
     test_crop_group_geometry_semantics();
     test_empty_scene_and_local_only();
     test_malformed_and_duplicate_ids();
     test_legacy_reserved_prefix_record_only();
+    test_legacy_unknown_visual_key();
     test_inflight_alldelete_cancelled_by_load();
     test_no_ghost_click_wait_icon();
     test_skip_mode_does_not_survive_load();

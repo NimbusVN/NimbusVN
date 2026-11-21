@@ -488,6 +488,59 @@ void test_sound_extension_fallback() {
           "R9 an already-qualified name is not probed again");
 }
 
+// ---------------------------------------------------------------------------
+// R10: 声道的实值音量。框架（preset.iet / config.iet）为每个声道算好
+// `s.segain.<通道id>`（SE=800、VOICE = g.segain.<id> × g.voicegain ×
+// (1-角色静音)），通道开声时必须用它——只看标签上的 gain= 的话，
+// VOICE 滑杆 / 逐角色音量 / 逐角色静音在播放阶段全部失效。
+// 顺带钉住：原生 [voice] 通道要能被 get_sound_info 看见（脚本靠它判断
+// "谁还在播"），s.voicevol 要能落到语音总线上。
+// ---------------------------------------------------------------------------
+void test_channel_realized_gain() {
+    Boot b("[var name=\"s.segain.v1\" data=\"600\"]\n[stop]\n");
+    auto& rt = *b.rt;
+    oa::test::frame(rt); // 让启动脚本把 s.segain.v1 落下来
+    const auto raw = [&](const std::string& id) -> long long {
+        const auto& st = rt.audio().state();
+        const auto it = st.se_channels.find(id);
+        if (it != st.se_channels.end()) return it->second.raw_gain;
+        const auto jt = st.voice_channels.find(id);
+        return jt == st.voice_channels.end() ? -999999 : jt->second.raw_gain;
+    };
+    rt.apply_media_event(tag_event("seplay", {{"id", "v1"}, {"file", "v.ogg"}}));
+    check(raw("v1") == 600, "R10 a channel without gain= takes s.segain.<id>");
+    // 标签上写了 gain= 就是显式决定（[se_fade]/会话内的临时音量都走这条）。
+    rt.apply_media_event(
+        tag_event("seplay", {{"id", "v1"}, {"file", "v.ogg"}, {"gain", "250"}}));
+    check(raw("v1") == 250, "R10 an explicit gain= wins over s.segain");
+    // 没有实值变量 → 满音量（老行为）。
+    rt.apply_media_event(tag_event("seplay", {{"id", "v2"}, {"file", "v.ogg"}}));
+    check(raw("v2") == 1000, "R10 a missing s.segain.<id> falls back to full gain");
+    // 0 就是静音（角色静音开关就是这个形状）。
+    rt.interpreter().set_variable("s.segain.v3", oa::runtime::Value::make_int(0));
+    rt.apply_media_event(tag_event("seplay", {{"id", "v3"}, {"file", "v.ogg"}}));
+    check(raw("v3") == 0, "R10 s.segain.<id> = 0 mutes the channel");
+
+    // get_sound_info 必须报原生 voice 通道（和 SE 共用一个 id 空间）。
+    rt.audio().play_voice("vq", "x.ogg", oa::media::SeConfig{});
+    rt.interpreter().apply_var({{"name", "t.snd"}, {"system", "get_sound_info"}});
+    const auto& vars = rt.interpreter().variables();
+    bool found_voice = false;
+    const auto size_v = vars.get("t.snd.size");
+    const long long n = size_v ? size_v->as_int().value_or(0) : 0;
+    for (long long i = 0; i < n; ++i) {
+        const auto v = vars.get("t.snd." + std::to_string(i) + ".id");
+        if (v && v->to_display() == "vq") found_voice = true;
+    }
+    check(found_voice, "R10 get_sound_info reports native [voice] channels");
+
+    // s.voicevol → 语音总线。
+    rt.interpreter().set_variable("s.voicevol", oa::runtime::Value::make_int(400));
+    oa::test::frame(rt);
+    check(approx(rt.audio().state().voice_volume, 0.4),
+          "R10 s.voicevol reaches the voice bus");
+}
+
 } // namespace
 
 int main() {
@@ -501,6 +554,7 @@ int main() {
     test_system_volume_bridge();
     test_ab_loop_switch();
     test_sound_extension_fallback();
+    test_channel_realized_gain();
     if (failures) {
         std::fprintf(stderr, "media_runtime_test: %d failure(s)\n", failures);
         return 1;

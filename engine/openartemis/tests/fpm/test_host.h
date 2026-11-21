@@ -308,7 +308,7 @@ inline bool click_layer(oa::runtime::GameRuntime& rt, const std::string& id) {
 /// A story page park: a click-advanceable wait.
 inline bool is_page_wait(const oa::runtime::Wait* w) {
     return w && (w->waiting_click() ||
-                 (w->timed() && w->can(oa::runtime::Wait::OnClick)));
+                 (w->timed() && w->has(oa::runtime::Wait::WakeClick)));
 }
 
 /// True when the visible story page has finished its per-glyph reveal.
@@ -460,6 +460,10 @@ public:
     int stage_h() const { return app_ ? app_->stage_height() : 0; }
     oa::runtime::GameRuntime& rt() { return app_->runtime(); }
     const oa::runtime::GameRuntime& rt() const { return app_->runtime(); }
+
+    /// 引擎最后一次致命错误的文本（脚本错误由 App 捕获后写在这里，
+    /// 宿主据此弹 "运行错误"）。空 = 没出错。
+    const std::string& last_error() const { return app_->last_error(); }
 
     // ---- 帧推进 ----------------------------------------------------------
     /// 推进 n 帧（每帧固定 delta_ms）。返回 false = 引擎要求退出。
