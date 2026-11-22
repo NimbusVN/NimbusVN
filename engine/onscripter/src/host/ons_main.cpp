@@ -554,6 +554,8 @@ int main(int argc, char **argv)
         } else if (!strcmp(arg, "--font")) {
             if (!next) { fprintf(stderr, "%s requires a file\n", arg); return 1; }
             font = next; ++i;
+        } else if (!strncmp(arg, "--save-dir=", 11)) {
+            save_dir = arg + 11;
         } else if (!strcmp(arg, "--save-dir")) {
             if (!next) { fprintf(stderr, "%s requires a path\n", arg); return 1; }
             save_dir = next; ++i;

@@ -37,6 +37,9 @@
 
 #include "ONScripterLabel.h"
 
+#include <cstdio>
+#include <string>
+
 #if !defined(_WIN32) && !defined(MACOS9) && !defined(PSP)
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -60,20 +63,24 @@ extern "C" void c2pstrcpy(Str255 dst, const char *src);	//#include <TextUtils.h>
 
 void ONScripterLabel::searchSaveFile( SaveFileInfo &save_file_info, int no )
 {
-    char file_name[256];
+    // 存档目录可能是宿主的隔离目录（--save-dir），长度不设上限，
+    // 这里不能再用固定大小的栈缓冲区拼路径。
+    const char *save_root = script_h.savedir ? script_h.savedir : script_h.save_path;
+    if ( !save_root ) save_root = "";
+
+    char slot_name[32];
+    snprintf( slot_name, sizeof(slot_name), "save%d.dat", no );
+    const std::string file_name = std::string(save_root) + slot_name;
+    const char *file_path = file_name.c_str();
 
     bool use_fullwidth = (script_h.system_menu_script == ScriptHandler::JAPANESE_SCRIPT);
     script_h.getStringFromInteger( save_file_info.sjis_no, no,
                                   (num_save_file >= 10)?2:1,
                                   false, use_fullwidth );
 #if !defined(_WIN32) && !defined(MACOS9) && !defined(PSP)
-    if (script_h.savedir)
-        sprintf( file_name, "%ssave%d.dat", script_h.savedir, no );
-    else
-        sprintf( file_name, "%ssave%d.dat", script_h.save_path, no );
     struct stat buf;
     struct tm tm;
-    if ( stat( file_name, &buf ) != 0 ){
+    if ( stat( file_path, &buf ) != 0 ){
         save_file_info.valid = false;
         return;
     }
@@ -95,15 +102,11 @@ void ONScripterLabel::searchSaveFile( SaveFileInfo &save_file_info, int no )
     save_file_info.hour   = tm.tm_hour;
     save_file_info.minute = tm.tm_min;
 #elif defined(_WIN32)
-    if (script_h.savedir)
-        sprintf( file_name, "%ssave%d.dat", script_h.savedir, no );
-    else
-        sprintf( file_name, "%ssave%d.dat", script_h.save_path, no );
     HANDLE  handle;
     FILETIME    tm, ltm;
     SYSTEMTIME  stm;
 
-    handle = CreateFile( file_name, GENERIC_READ, 0, NULL,
+    handle = CreateFile( file_path, GENERIC_READ, 0, NULL,
                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL );
     if ( handle == INVALID_HANDLE_VALUE ){
         save_file_info.valid = false;
@@ -120,15 +123,11 @@ void ONScripterLabel::searchSaveFile( SaveFileInfo &save_file_info, int no )
     save_file_info.hour   = stm.wHour;
     save_file_info.minute = stm.wMinute;
 #elif defined(MACOS9)
-    if (script_h.savedir)
-        sprintf( file_name, "%ssave%d.dat", script_h.savedir, no );
-    else
-        sprintf( file_name, "%ssave%d.dat", script_h.save_path, no );
         CInfoPBRec  pb;
         Str255      p_file_name;
         FSSpec      file_spec;
         DateTimeRec tm;
-        c2pstrcpy( p_file_name, file_name );
+        c2pstrcpy( p_file_name, file_path );
         if ( FSMakeFSSpec(0, 0, p_file_name, &file_spec) != noErr ){
         	save_file_info.valid = false;
         	return;
@@ -147,12 +146,8 @@ void ONScripterLabel::searchSaveFile( SaveFileInfo &save_file_info, int no )
         save_file_info.hour   = tm.hour;
         save_file_info.minute = tm.minute;
 #elif defined(PSP)
-    if (script_h.savedir)
-        sprintf( file_name, "%ssave%d.dat", script_h.savedir, no );
-    else
-        sprintf( file_name, "%ssave%d.dat", script_h.save_path, no );
     SceIoStat buf;
-    if ( sceIoGetstat(file_name, &buf)<0 ){
+    if ( sceIoGetstat(file_path, &buf)<0 ){
         save_file_info.valid = false;
         return;
     }
@@ -162,9 +157,8 @@ void ONScripterLabel::searchSaveFile( SaveFileInfo &save_file_info, int no )
     save_file_info.hour   = buf.st_mtime.hour;
     save_file_info.minute = buf.st_mtime.minute;
 #else
-    sprintf( file_name, "save%d.dat", no );
     FILE *fp;
-    if ( (fp = fopen( file_name, "rb" )) == NULL ){
+    if ( (fp = fopen( file_path, "rb" )) == NULL ){
         save_file_info.valid = false;
         return;
     }
@@ -191,8 +185,8 @@ void ONScripterLabel::searchSaveFile( SaveFileInfo &save_file_info, int no )
 
     // Should already by null/unassigned when passed in as argument.
     // This isn't our job to manage here.
-    save_file_info.realPath = (char *)malloc(sizeof(char) * (strlen(file_name)+1));
-    strcpy(save_file_info.realPath, file_name);
+    save_file_info.realPath = (char *)malloc(sizeof(char) * (file_name.size()+1));
+    strcpy(save_file_info.realPath, file_path);
 }
 
 int ONScripterLabel::loadSaveFile( int no, bool input_flag )

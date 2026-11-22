@@ -119,6 +119,13 @@ out\windows-ons\Release\onscripter.exe "%ONS_GAME%" --ons-frames 300 --ons-offsc
 out\windows-ons\Release\onscripter.exe "%ONS_GAME%" --ons-encoding gbk --ons-dump-frame out\ons.png
 ```
 
+另外两个内核的隔离存档参数（桌面同样可用）：
+
+```bat
+out\windows\Release\krkrsdl3.exe "D:/Games/SomeGame/data.xp3" -save-dir=out\krkr_save
+out\windows\Release\openartemis.exe "D:/Games/SomeGame/root.pfs" --save-dir=out\oa_save
+```
+
 常用测试参数：`--ons-frames N`（渲染 N 帧后退出）、`--ons-offscreen`（无窗口）、
 `--ons-dump-frame PATH` / `--ons-dump-at N`（PNG 快照）、`--ons-auto-click MS`、
 `--ons-click-at N X,Y`、`--ons-key-at N KEY`、`--ons-start-label NAME`、
@@ -151,8 +158,22 @@ script\build-android.bat
     单游戏选项：krkrsdl3 可选软件/GL/Vulkan，openartemis 可选 SDL/GL 与
     android/windows 平台段（默认 android），onscripter 无额外选项。
   - 选项按 `EngineOptions` 的能力表生成和拼参数，新增引擎/选项只改这一张表。
-- ONS 的启动参数是 `<游戏目录>`（第一参数）；勾选「隔离存档目录」时追加
-  `--save-dir <应用私有目录>/save/<游戏名>`。
+- ONS 的启动参数是 `<游戏目录>`（第一参数），脚本（`nscript.dat` / `nscript.___`）
+  与 `*.nsa` / `*.sar` 包由引擎在游戏目录里自行探测。
+- 存档：三个内核统一走「隔离存档」，每个游戏一份应用私有目录
+  `<files>/saves/<内核>/<游戏名>-<路径哈希>/`（哈希取游戏绝对路径的 CRC32，
+  两个同名目录不会抢存档）。详情页「存档」区可以单独开关，全局设置里配默认值；
+  旧的 `<external-files>/save/<游戏名>` 会在首次启用时自动迁入，不会“存档消失”。
+  - **krkrsdl3**：`-save-dir=<目录>`。引擎把 KAG 写的相对名 `savedata/xxx`
+    整体重定向到该目录（读取、写入、存在性检查、目录枚举都走同一处），
+    游戏脚本不用改；没传参数时仍是 `<游戏目录>/savedata/`。
+  - **openartemis**：`--save-dir=<目录>`，优先于旧的 `OA_SAVE_ROOT` 环境变量。
+  - **onscripter**：`--save-dir <目录>` / `--save-dir=<目录>` 都支持，
+    等价于 `setSavePath`，脚本里的 `savedir` 命令只会再往下建子目录。
+  - 详情页支持**导出 / 导入 zip**：导出包根目录直接是存档文件，另带
+    `nimbus-save.json` 清单（游戏名/内核/来源路径）；导入覆盖同名文件，
+    路径穿越条目会被拒绝。带清单的包严格按原结构落盘；没有清单的包
+    （用户自己压缩整个文件夹）才会剥掉唯一的顶层目录。
 - 只有 ONS 游戏界面固定为 `sensorLandscape`（默认横屏，支持左右横屏）；
   启动器不强制方向，跟随系统/设备当前方向；
   版本号唯一来源是根 `CMakeLists.txt` 的 `NIMBUSVN_VERSION`，APK 的

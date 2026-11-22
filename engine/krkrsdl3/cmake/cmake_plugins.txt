@@ -63,6 +63,7 @@ set(KRKRSDL_PLUGINS_SRC
 	${KRKRSDL_PLUGINS_PATH}/ExtKAGParser/TJSAry.cpp
 	${KRKRSDL_PLUGINS_PATH}/ExtKAGParser/TJSDic.cpp
     ${KRKRSDL_PLUGINS_PATH}/LayerExDraw/LayerExDraw.cpp
+    ${KRKRSDL_PLUGINS_PATH}/DrawDeviceD2D/DrawDeviceD2Dm.cpp
     ${KRKRSDL_PLUGINS_PATH}/psbfile/PSB.cpp
     ${KRKRSDL_PLUGINS_PATH}/psbfile/PSBData.cpp
     ${KRKRSDL_PLUGINS_PATH}/psbfile/PSBFile.cpp

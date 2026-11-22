@@ -51,6 +51,7 @@ import androidx.core.content.ContextCompat;
 
 import org.nimbusvn.input.InputPrefs;
 import org.nimbusvn.launcher.LauncherDatabase;
+import org.nimbusvn.launcher.SaveStore;
 import org.openartemis.GameActivity;
 import org.tvp.krkrsdl3.KRKRActivity;
 
@@ -58,7 +59,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -77,6 +80,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_DIR_PICKER = 10;
     private static final int REQUEST_COVER_IMAGE = 20;
     private static final int REQUEST_STARTUP_FILE = 30;
+    private static final int REQUEST_SAVE_EXPORT = 40;
+    private static final int REQUEST_SAVE_IMPORT = 50;
     private static final String COLOR_NOTDIR = "#FF0000";
     private static final String COLOR_INRDIR = "#4CAF50";
     private static final String COLOR_SAFDIR = "#FF26C6DA";
@@ -837,6 +842,11 @@ public class MainActivity extends AppCompatActivity {
     // 当前详情中正在编辑的游戏（用于启动文件选择）
     private GameInfo m_currentDetailGame;
 
+    // 存档导入/导出的目标游戏（选文件时会离开界面，先把上下文记下来）
+    private String m_savePendingPath;
+    private Engine m_savePendingEngine;
+    private String m_savePendingName;
+
     // 当前这一轮目录扫描已经访问过的目录数（配合 SCAN_DIR_LIMIT 用）
     private int m_scanVisited;
 
@@ -1020,7 +1030,77 @@ public class MainActivity extends AppCompatActivity {
                 }
                 m_currentCoverGame = null;
             }
+        } else if (requestCode == REQUEST_SAVE_EXPORT && resultData != null) {
+            Uri outUri = resultData.getData();
+            if (outUri != null) doExportSave(outUri);
+        } else if (requestCode == REQUEST_SAVE_IMPORT && resultData != null) {
+            Uri inUri = resultData.getData();
+            if (inUri != null) confirmImportSave(inUri);
         }
+    }
+
+    // ========== 存档导入导出 ==========
+
+    /** 导出当前待处理游戏的隔离存档到用户选定的 zip。 */
+    private void doExportSave(Uri outUri) {
+        final String gamePath = m_savePendingPath;
+        final Engine engine = m_savePendingEngine;
+        final String gameName = m_savePendingName;
+        if (gamePath == null || engine == null) return;
+
+        final File dir = SaveStore.dirFor(this, engine.id, gamePath);
+        new Thread(() -> {
+            try (OutputStream os = getContentResolver().openOutputStream(outUri)) {
+                if (os == null) throw new IOException("无法写入目标文件");
+                JSONObject manifest = SaveStore.makeManifest(engine.id, gamePath, gameName, dir);
+                int count = SaveStore.exportZip(dir, manifest, os);
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "已导出 " + count + " 个存档文件", Toast.LENGTH_LONG).show());
+            } catch (Exception e) {
+                Log.e("## nimbusvn.save", "export failed: " + e.getMessage());
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "导出失败：" + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }, "save-export").start();
+    }
+
+    /** 导入前确认：同名文件会被覆盖。 */
+    private void confirmImportSave(Uri inUri) {
+        final String gamePath = m_savePendingPath;
+        final Engine engine = m_savePendingEngine;
+        final String gameName = m_savePendingName;
+        if (gamePath == null || engine == null) return;
+
+        final File dir = SaveStore.dirFor(this, engine.id, gamePath);
+        new AlertDialog.Builder(this)
+                .setTitle("导入存档")
+                .setMessage("将把压缩包里的存档写入：\n" + dir.getName()
+                        + "\n\n同名文件会被覆盖，确定继续吗？")
+                .setPositiveButton("导入", (d, w) -> doImportSave(inUri, dir, gameName))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void doImportSave(Uri inUri, File dir, String gameName) {
+        new Thread(() -> {
+            try (InputStream is = getContentResolver().openInputStream(inUri)) {
+                if (is == null) throw new IOException("无法读取压缩包");
+                SaveStore.ImportResult result = SaveStore.importZip(dir, SaveStore.root(this), is);
+                StringBuilder msg = new StringBuilder();
+                msg.append("已导入 ").append(result.files).append(" 个文件（")
+                        .append(SaveStore.formatBytes(result.bytes)).append("）");
+                if (result.hasSource() && !result.game.isEmpty()
+                        && gameName != null && !result.game.equals(gameName)) {
+                    msg.append("\n注意：压缩包来源是《").append(result.game).append("》");
+                }
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        msg.toString(), Toast.LENGTH_LONG).show());
+            } catch (Exception e) {
+                Log.e("## nimbusvn.save", "import failed: " + e.getMessage());
+                runOnUiThread(() -> Toast.makeText(MainActivity.this,
+                        "导入失败：" + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        }, "save-import").start();
     }
 
     @Override
@@ -1495,8 +1575,11 @@ public class MainActivity extends AppCompatActivity {
             if (m_scanVisited >= SCAN_DIR_LIMIT) return;
 
             final String name = file.getName();
-            // 深度 > 1 时 save/ 一律当存档目录跳过；深度 = 1 保持旧行为（应用私有目录仍跳过）
-            if (name.equals("save") && (skipSave || maxDepth > 1)) continue;
+            // 存档目录一律跳过（save 是旧布局，saves 是隔离存档的新布局）。
+            // 深度 > 1 时都跳过；深度 = 1 只对应用私有目录跳过，用户自己选的
+            // 游戏根目录保持旧行为。
+            if ((name.equals("save") || name.equals("saves"))
+                    && (skipSave || maxDepth > 1)) continue;
             if (name.startsWith(".")) continue;
 
             if (depth >= maxDepth) {
@@ -1656,9 +1739,9 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 构建引擎启动参数（按内核分流）。
      *
-     *   krkrsdl3（XP3/TJS）: <startup> [--save-dir <dir>]
-     *   openartemis（PFS）:  <startup> --platform android|windows
-     *   onscripter（ONS）:   <游戏目录> [其它选项]
+     *   krkrsdl3（XP3/TJS）: <startup> [-save-dir=<隔离存档目录>]
+     *   openartemis（PFS）:  <startup> --platform android|windows [--save-dir=<目录>]
+     *   onscripter（ONS）:   <游戏目录> [--save-dir=<目录>]
      *
      * 渲染器不在这里指定：用哪个后端由内核自己的缺省值决定，
      * 需要覆盖时在单人配置的启动参数里手写（-render=gl / --renderer gles 等）。
@@ -1693,13 +1776,9 @@ public class MainActivity extends AppCompatActivity {
         args.add(startupFile);
 
         // ② 单游戏自定义参数：只替换参数部分，不吞掉 Artemis 的平台段。
-        boolean hasCustomArgs = false;
         if (gameConfig != null) {
             String ca = gameConfig.optString("args", "");
-            if (!ca.isEmpty()) {
-                args.addAll(cmdToArgs(ca));
-                hasCustomArgs = true;
-            }
+            if (!ca.isEmpty()) args.addAll(cmdToArgs(ca));
         }
 
         // ③ 引擎能力表声明的选项（krkr 的 -render、artemis 的 --renderer/--platform）。
@@ -1718,21 +1797,13 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 自定义参数已经完整表达启动参数时，不再叠加全局的隔离存档开关。
-        if (hasCustomArgs) return args;
-
-        // ④ 其余内核的全局选项（krkrsdl3 的隔离存档）。
-        try {
-            if (engine == Engine.KRKR && m_gameargs != null
-                    && m_gameargs.optBoolean("scopedsavedir", false)) {
-                String savedir = buildSaveRoot(gamedir);
-                if (savedir != null) {
-                    args.add("--save-dir");
-                    args.add(savedir);
-                }
+        // ④ 隔离存档：krkrsdl3 只认 -save-dir=<目录>（引擎会把 savedata/ 整体重定向）。
+        //    自定义参数里已经写了就不重复追加。
+        if (engine == Engine.KRKR) {
+            String saveRoot = buildSaveRoot(engine, gamedir, gameConfig);
+            if (saveRoot != null && !hasOption(args, "-save-dir")) {
+                args.add("-save-dir=" + saveRoot);
             }
-        } catch (Exception e) {
-            Log.e("## krkrsdl3", "buildLaunchArgs error: " + e.getMessage());
         }
         return args;
     }
@@ -1765,17 +1836,17 @@ public class MainActivity extends AppCompatActivity {
             String[] parts = cmdString.split(" ", 2);
             String first = parts[0];
             String rest = parts.length > 1 ? parts[1] : "";
-            JSONObject config = new JSONObject();
-            boolean hasOverride = false;
+            // 以现有配置为底：这里只改启动文件和自定义参数，别把内核/标签/
+            // 存档开关等其它键一起覆盖掉。
+            JSONObject config = m_db.getGameConfig(gamePath);
             if (!first.equals(defaultStartup(engine))) {
                 config.put("startup_file", first);
-                hasOverride = true;
+            } else {
+                config.remove("startup_file");
             }
-            if (!rest.isEmpty()) {
-                config.put("args", rest);
-                hasOverride = true;
-            }
-            m_db.saveGameConfig(gamePath, hasOverride ? config : new JSONObject());
+            if (!rest.isEmpty()) config.put("args", rest);
+            else config.remove("args");
+            m_db.saveGameConfig(gamePath, config);
         } catch (JSONException e) {
             Log.e("## krkrsdl3", "saveArgsConfig error: " + e.getMessage());
         }
@@ -1795,7 +1866,7 @@ public class MainActivity extends AppCompatActivity {
             m_gameargs = buildLaunchArgs(gameinfo.getGameDir(), null, engine);
         }
 
-        startGame(gamemod, gameinfo.getRealPath(), m_gameargs, engine);
+        startGame(gamemod, gameinfo.getRealPath(), m_gameargs, engine, gameConfig);
 
         if (m_listgameadaptor != null) {
             m_listgameadaptor.notifyGameLaunch(gameinfo);
@@ -1810,18 +1881,25 @@ public class MainActivity extends AppCompatActivity {
      * (含 system.ini 的解包项目)；krkrsdl3 的数据源是 XP3 包/目录；
      * onscripter 只需要目录（第一参数），脚本与封包由引擎自己探测。
      */
-    private void startGame(int mode, String gamepath, ArrayList<String> args, Engine engine) {
-        if (mode == 7) {
+    private void startGame(int mode, String gamepath, ArrayList<String> args, Engine engine,
+                           JSONObject gameConfig) {
+        // 开了隔离存档就不用要求游戏目录可写——存档写在应用私有目录里，
+        // 只读介质（外置卡/只读挂载）上的游戏也能正常玩。
+        boolean isolated = SaveStore.isIsolated(gameConfig,
+                m_gameargs != null && m_gameargs.optBoolean(SaveStore.CONFIG_KEY, false));
+        int need = 4 | 1; // 可读 + 找到启动文件
+        if (!isolated) need |= 2;
+
+        if ((mode & need) == need) {
             if (engine == Engine.ONSCRIPTER) {
                 // ONS：游戏目录是第一参数，引擎在目录里找 nscript.dat / *.nsa。
                 if (args == null) args = new ArrayList<>();
                 if (args.isEmpty()) args.add(gamepath);
                 else args.set(0, gamepath);
                 // 隔离存档：--save-dir 由这里统一追加，避免和自定义参数重复。
-                String saveRoot = buildSaveRoot(gamepath);
+                String saveRoot = buildSaveRoot(engine, gamepath, gameConfig);
                 if (saveRoot != null && !hasOption(args, "--save-dir")) {
-                    args.add("--save-dir");
-                    args.add(saveRoot);
+                    args.add("--save-dir=" + saveRoot);
                 }
                 startOns(args);
             } else if (engine == Engine.OPENARTEMIS) {
@@ -1830,7 +1908,12 @@ public class MainActivity extends AppCompatActivity {
                 String source = pfs.isFile() ? pfs.getAbsolutePath() : gamepath;
                 if (args.isEmpty()) args.add(source);
                 else args.set(0, source);
-                startOpenArtemis(args, buildSaveRoot(gamepath));
+                // 命令行参数与 OA_SAVE_ROOT 双通道：引擎优先看参数，环境变量兼容旧壳。
+                String saveRoot = buildSaveRoot(engine, gamepath, gameConfig);
+                if (saveRoot != null && !hasOption(args, "--save-dir")) {
+                    args.add("--save-dir=" + saveRoot);
+                }
+                startOpenArtemis(args, saveRoot);
             } else {
                 if (!args.isEmpty()) args.set(0, gamepath + "/" + args.get(0));
                 startKrkrsdl3(args);
@@ -1843,7 +1926,7 @@ public class MainActivity extends AppCompatActivity {
         message.append("路径: ").append(gamepath).append("\n\n");
         message.append("内核: ").append(engine.badge).append(" (").append(engine.id).append(")\n\n");
         if ((mode & 4) == 0) message.append("⚠ 目录不可读\n");
-        if ((mode & 2) == 0) message.append("⚠ 目录不可写(存档需要)\n");
+        if (!isolated && (mode & 2) == 0) message.append("⚠ 目录不可写(存档需要)\n");
         if ((mode & 1) == 0) {
             message.append("⚠ 未找到 " + defaultStartup(engine));
             if (engine == Engine.OPENARTEMIS) message.append(" / system.ini\n\n");
@@ -1859,25 +1942,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 每游戏存档隔离目录(勾选 scopedsavedir 时)。
-     * openartemis 读 OA_SAVE_ROOT 环境变量(见 GameActivity)；krkrsdl3 用
-     * --save-dir 参数。返回 null = 用引擎默认存档位置。
+     * 每游戏独立存档目录（隔离存档）。单人配置优先，没配过就看全局开关。
+     * 返回 null = 用引擎默认存档位置（游戏目录）。
+     *
+     * <p>三个内核都走同一套分配：{@code <私有 files>/saves/<内核>/<游戏名>-<哈希>}。
+     * 启用时顺手把旧版 {@code <external-files>/save/<游戏名>} 的存档迁进来，
+     * 老用户打开开关后不会“存档消失”。</p>
      */
-    private String buildSaveRoot(String gamedir) {
+    private String buildSaveRoot(Engine engine, String gamedir, JSONObject gameConfig) {
         try {
-            if (m_gameargs == null || !m_gameargs.optBoolean("scopedsavedir", false))
-                return null;
-            String g = gamedir;
-            while (g.endsWith("/")) g = g.substring(0, g.length() - 1);
-            int idx = g.lastIndexOf('/');
-            String gamename = idx >= 0 ? g.substring(idx + 1) : g;
-            String savedir = getExternalFilesDir(null).toString();
-            if (!savedir.endsWith("/")) savedir += '/';
-            savedir += "save/" + gamename;
-            File file = new File(savedir);
-            if (file.exists() || file.mkdirs()) return savedir;
+            boolean global = m_gameargs != null
+                    && m_gameargs.optBoolean(SaveStore.CONFIG_KEY, false);
+            if (!SaveStore.isIsolated(gameConfig, global)) return null;
+
+            File dir = SaveStore.dirFor(this, engine.id, gamedir);
+            SaveStore.migrateLegacy(this, gamedir, dir);
+            return dir.getAbsolutePath();
         } catch (Exception e) {
-            Log.e("## krkrsdl3", "buildSaveRoot error: " + e.getMessage());
+            Log.e("## nimbusvn.save", "buildSaveRoot error: " + e.getMessage());
         }
         return null;
     }
@@ -2051,6 +2133,12 @@ public class MainActivity extends AppCompatActivity {
 
     private int dpToPx(int dp) {
         return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    /** 导出文件名里去掉路径分隔符等非法字符。 */
+    private static String fileSafeName(String name) {
+        if (name == null || name.trim().isEmpty()) return "save";
+        return name.trim().replaceAll("[\\\\/:*?\"<>|\\s]+", "_");
     }
 
     /**
@@ -2244,6 +2332,47 @@ public class MainActivity extends AppCompatActivity {
         // 按引擎能力表生成单游戏选项（后端/平台等）。
         rebuildDetailOptions(detail_options_container, detectedEngine, gameConfig);
 
+        // ===== 存档区：隔离开关 + 目录信息 + 导入导出 =====
+        CheckBox check_isolated = view_gamedetail.findViewById(R.id.check_detail_isolated);
+        TextView text_saveinfo = view_gamedetail.findViewById(R.id.text_detail_saveinfo);
+        final boolean globalIsolated = m_gameargs != null
+                && m_gameargs.optBoolean(SaveStore.CONFIG_KEY, false);
+        check_isolated.setChecked(SaveStore.isIsolated(gameConfig, globalIsolated));
+
+        final Runnable refreshSaveInfo = () -> {
+            Engine engine = currentDetailEngine(detail_engine_group, autoEngine);
+            File saveDir = SaveStore.dirFor(this, engine.id, gameinfo.m_path, false);
+            int files = SaveStore.countFiles(saveDir);
+            String info = "saves/" + engine.id + "/" + saveDir.getName();
+            if (files == 0) {
+                info += " · 还没有存档";
+            } else {
+                info += " · " + files + " 个文件 · "
+                        + SaveStore.formatBytes(SaveStore.totalBytes(saveDir));
+            }
+            text_saveinfo.setText(info);
+        };
+        refreshSaveInfo.run();
+
+        check_isolated.setOnCheckedChangeListener((buttonView, checked) -> {
+            try {
+                gameConfig.put(SaveStore.CONFIG_KEY, checked);
+            } catch (JSONException ignored) {
+            }
+            // 和标签一样即时落库：即使不点“启动游戏”，开关也已经生效。
+            if (m_db != null) m_db.saveGameConfig(gameinfo.m_path, gameConfig);
+            if (checked) {
+                Engine engine = currentDetailEngine(detail_engine_group, autoEngine);
+                SaveStore.migrateLegacy(this, gameinfo.m_path,
+                        SaveStore.dirFor(this, engine.id, gameinfo.m_path));
+            } else {
+                Toast.makeText(this,
+                        "已关闭隔离存档；已有存档仍留在独立目录，重新打开即可继续使用",
+                        Toast.LENGTH_LONG).show();
+            }
+            refreshSaveInfo.run();
+        });
+
         // 初始化参数显示
         String initialMergedCmd = buildDisplayString(gameConfig, detectedEngine);
         text_gameargs.setText(initialMergedCmd);
@@ -2272,7 +2401,8 @@ public class MainActivity extends AppCompatActivity {
                 String oldTags = gameConfig.optString("tags", "");
                 if (!newTags.equals(oldTags) && m_db != null) {
                     try {
-                        JSONObject cfg = new JSONObject();
+                        // 以现有配置为底，别把内核/参数/存档开关一起写没了
+                        JSONObject cfg = new JSONObject(gameConfig.toString());
                         cfg.put("tags", newTags);
                         m_db.saveGameConfig(gameinfo.m_path, cfg);
                         refreshGameUI();
@@ -2295,6 +2425,8 @@ public class MainActivity extends AppCompatActivity {
                 text_startup.setText(defaultStartup(engine));
             }
             updateDetailArgsDisplay(gameinfo, text_startup, text_gameargs, engine);
+            // 存档目录按内核分命名空间，换内核后要重新显示
+            refreshSaveInfo.run();
         });
 
         // 启动文件浏览 → 更新参数显示
@@ -2365,6 +2497,7 @@ public class MainActivity extends AppCompatActivity {
 
                 // 构建启动参数（始终使用 UI 当前值）
                 launchCfg.put("engine", engineOverride.isEmpty() ? "auto" : engineOverride);
+                launchCfg.put(SaveStore.CONFIG_KEY, check_isolated.isChecked());
                 JSONObject launchOptions = collectDetailOptions(detail_options_container);
                 for (java.util.Iterator<String> it = launchOptions.keys(); it.hasNext(); ) {
                     String key = it.next();
@@ -2383,7 +2516,7 @@ public class MainActivity extends AppCompatActivity {
             }
             ArrayList<String> args = buildLaunchArgs(gameinfo.getGameDir(), launchCfg, launchEngine);
             int runMode = gameinfo.checkValid(text_startup.getText().toString(), launchEngine);
-            startGame(runMode, gameinfo.getRealPath(), args, launchEngine);
+            startGame(runMode, gameinfo.getRealPath(), args, launchEngine, launchCfg);
             if (m_listgameadaptor != null) m_listgameadaptor.notifyGameLaunch(gameinfo);
         });
 
@@ -2394,6 +2527,84 @@ public class MainActivity extends AppCompatActivity {
         window_config.setContentView(view_gamedetail);
         window_config.setFocusable(true);
         window_config.setAnimationStyle(android.R.style.Animation_Toast);
+
+        // ===== 存档导入 / 导出 / 清空 =====
+        Button button_save_export = view_gamedetail.findViewById(R.id.button_save_export);
+        Button button_save_import = view_gamedetail.findViewById(R.id.button_save_import);
+        Button button_save_clear = view_gamedetail.findViewById(R.id.button_save_clear);
+
+        button_save_export.setOnClickListener(v -> {
+            if (!check_isolated.isChecked()) {
+                Toast.makeText(this, "先勾选「隔离存档」才能导出", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Engine engine = currentDetailEngine(detail_engine_group, autoEngine);
+            File saveDir = SaveStore.dirFor(this, engine.id, gameinfo.m_path);
+            if (SaveStore.countFiles(saveDir) == 0) {
+                Toast.makeText(this, "这个游戏还没有存档可导出", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            m_savePendingPath = gameinfo.m_path;
+            m_savePendingEngine = engine;
+            m_savePendingName = gameinfo.m_name;
+            String stamp = new SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(new Date());
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/zip");
+            intent.putExtra(Intent.EXTRA_TITLE,
+                    fileSafeName(gameinfo.m_name) + "-saves-" + stamp + ".zip");
+            window_config.dismiss();
+            startActivityForResult(intent, REQUEST_SAVE_EXPORT);
+        });
+
+        button_save_import.setOnClickListener(v -> {
+            if (!check_isolated.isChecked()) {
+                Toast.makeText(this, "先勾选「隔离存档」才能导入", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            m_savePendingPath = gameinfo.m_path;
+            m_savePendingEngine = currentDetailEngine(detail_engine_group, autoEngine);
+            m_savePendingName = gameinfo.m_name;
+            new AlertDialog.Builder(this)
+                    .setTitle("导入存档")
+                    .setMessage("选择之前导出的存档压缩包（.zip）。\n同名存档会被覆盖。")
+                    .setPositiveButton("选择文件", (d, w) -> {
+                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType("*/*");
+                        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                                "application/zip", "application/x-zip-compressed"});
+                        window_config.dismiss();
+                        startActivityForResult(intent, REQUEST_SAVE_IMPORT);
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+        });
+
+        button_save_clear.setOnClickListener(v -> {
+            if (!check_isolated.isChecked()) {
+                Toast.makeText(this, "当前没有启用隔离存档", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Engine engine = currentDetailEngine(detail_engine_group, autoEngine);
+            File saveDir = SaveStore.dirFor(this, engine.id, gameinfo.m_path);
+            int files = SaveStore.countFiles(saveDir);
+            if (files == 0) {
+                Toast.makeText(this, "没有可清空的存档", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle("清空存档")
+                    .setMessage("将删除 " + files + " 个存档文件，无法恢复。\n确定继续吗？")
+                    .setPositiveButton("删除", (d, w) -> {
+                        int removed = SaveStore.clear(saveDir, SaveStore.root(this));
+                        refreshSaveInfo.run();
+                        Toast.makeText(this, "已删除 " + removed + " 个文件",
+                                Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
+        });
 
         // 计算弹窗最大高度（屏幕高度的 65%），超出时可滚动
         android.util.DisplayMetrics dm = new android.util.DisplayMetrics();

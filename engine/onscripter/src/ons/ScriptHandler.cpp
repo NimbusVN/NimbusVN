@@ -276,6 +276,8 @@ void ScriptHandler::setKeyTable( const unsigned char *key_table )
 
 void ScriptHandler::setSavedir( const char *dir )
 {
+    // savedir 命令可能在脚本里执行多次（换存档夹），旧值要先释放。
+    if (savedir){ delete[] savedir; savedir = NULL; }
     savedir = new char[ strlen(dir) + strlen(save_path) + 2];
     sprintf( savedir, "%s%s%c", save_path, dir, DELIMITER );
     mkdir(savedir

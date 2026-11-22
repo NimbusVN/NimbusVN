@@ -87,9 +87,16 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="隔离存档目录"
+        android:text="默认启用隔离存档"
         android:textColor="@color/text_secondary"
         android:textSize="13sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="每个游戏一份独立存档目录（应用私有空间），三个内核通用；单个游戏可在详情页里单独开关，并支持导出/导入 zip。"
+        android:textColor="@color/text_muted"
+        android:textSize="11sp" />
 
     <CheckBox
         android:id="@+id/button_alloweditargs"

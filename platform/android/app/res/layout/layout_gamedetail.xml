@@ -261,6 +261,86 @@
         android:orientation="vertical"
         android:visibility="gone" />
 
+    <!-- 存档：隔离目录 + 导入导出 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="8dp"
+        android:background="@color/bg_card" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="存档"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <CheckBox
+            android:id="@+id/check_detail_isolated"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="8dp"
+            android:layout_weight="1"
+            android:text="隔离存档（独立目录）"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/text_detail_saveinfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textColor="@color/text_muted"
+        android:textSize="11sp"
+        tools:text="saves/ons/game-1a2b3c4d · 12 个文件 · 1.2 MB" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/button_save_export"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:background="@drawable/btn_secondary"
+            android:text="导出存档"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/button_save_import"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_marginLeft="6dp"
+            android:layout_weight="1"
+            android:background="@drawable/btn_secondary"
+            android:text="导入存档"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/button_save_clear"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_marginLeft="6dp"
+            android:layout_weight="1"
+            android:background="@drawable/btn_secondary"
+            android:text="清空"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
     <!-- 标签 -->
     <LinearLayout
         android:layout_width="match_parent"
