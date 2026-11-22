@@ -106,6 +106,37 @@
         android:layout_marginBottom="12dp"
         android:background="@color/bg_card" />
 
+    <!-- 游戏内控件 -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="游戏内控件"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
+    <CheckBox
+        android:id="@+id/button_virtualinput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="启用游戏内虚拟键盘 / 鼠标"
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="关闭后游戏里不显示任何悬浮控件（包括右上角「≡」）；下次启动游戏生效。"
+        android:textColor="@color/text_muted"
+        android:textSize="11sp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="12dp"
+        android:background="@color/bg_card" />
+
     <!-- 底部信息 -->
     <LinearLayout
         android:layout_width="match_parent"

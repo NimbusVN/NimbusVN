@@ -49,6 +49,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import org.nimbusvn.input.InputPrefs;
 import org.nimbusvn.launcher.LauncherDatabase;
 import org.openartemis.GameActivity;
 import org.tvp.krkrsdl3.KRKRActivity;
@@ -1112,6 +1113,16 @@ public class MainActivity extends AppCompatActivity {
         }
 
         initUiScanDepth();
+
+        // 游戏内虚拟输入层的总开关：关掉后 SDLActivity 不再挂载任何悬浮控件
+        // （包括收起的「≡」）。
+        CheckBox virtualInput = findViewById(R.id.button_virtualinput);
+        if (virtualInput != null) {
+            InputPrefs inputPrefs = InputPrefs.get(this);
+            virtualInput.setChecked(inputPrefs.masterEnabled());
+            virtualInput.setOnClickListener(v ->
+                    InputPrefs.get(this).setMasterEnabled(virtualInput.isChecked()));
+        }
 
         Button button_checkupdate = findViewById(R.id.button_checkupdate);
         button_checkupdate.setOnClickListener(view -> {

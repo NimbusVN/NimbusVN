@@ -486,6 +486,14 @@ public class SDLActivity extends AppCompatActivity implements View.OnSystemUiVis
 
         setContentView(mLayout);
 
+        // NimbusVN: 统一虚拟输入层。挂在 SDL 的根布局上，三个内核以及
+        // 以后新增的 SDL 内核都会自动继承；失败时不能影响内核启动。
+        try {
+            org.nimbusvn.input.VirtualControlsOverlay.attach(this, mLayout);
+        } catch (Throwable t) {
+            Log.w("NimbusInput", "virtual controls attach failed", t);
+        }
+
         setWindowStyle(false);
 
         getWindow().getDecorView().setOnSystemUiVisibilityChangeListener(this);
@@ -527,6 +535,7 @@ public class SDLActivity extends AppCompatActivity implements View.OnSystemUiVis
     @Override
     protected void onPause() {
         Log.v(TAG, "onPause()");
+        org.nimbusvn.input.VirtualControlsOverlay.releaseInputs();
         super.onPause();
 
         if (mHIDDeviceManager != null) {
@@ -687,6 +696,7 @@ public class SDLActivity extends AppCompatActivity implements View.OnSystemUiVis
     @Override
     protected void onDestroy() {
         Log.v(TAG, "onDestroy()");
+        org.nimbusvn.input.VirtualControlsOverlay.releaseInputs();
 
         if (mHIDDeviceManager != null) {
             HIDDeviceManager.release(mHIDDeviceManager);

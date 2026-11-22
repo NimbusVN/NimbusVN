@@ -163,6 +163,31 @@ script\build-android.bat
   - 双指上下滑 = 滚轮（回想/翻页）
   - 三指轻点 = 右键（备用菜单手势）
   - 长按后拖动 = 按住左键拖动（滑杆/滚动条）
+- 虚拟输入层（三个内核共用，代码在
+  `platform/android/app/java/org/nimbusvn/input/`）：
+  - 挂在 `SDLActivity` 的根布局上，KRKR / OpenArtemis / ONS 以及后续新增的
+    SDL 内核自动继承，不需要各自实现；
+  - **虚拟键盘和虚拟鼠标是两套独立开关**：右上角工具条分别点「键盘」「鼠标」，
+    互不影响，可以同时开启；两个都关就是纯触摸；
+  - **虚拟键盘**默认加载一套内置键位（方向盘 + ABXY + L/R + 菜单/跳过），
+    每个键都是独立的 `VirtualKey`：设置页里可以逐键改映射、拖动位置、
+    用底部滑杆调大小、删除，也可以「＋ 添加按键」从键位目录新增；
+    默认键位见 `VirtualKey.defaults()`；
+  - **虚拟鼠标**：只做定位和 hover，屏幕上没有 L/R/M 按键。单指拖动移动
+    光标并持续发 MouseMove；单指轻点在光标处按左键；长按不动再拖 =
+    按住左键拖拽（滑块/滚动条）；双指轻点右键；双指上下滑滚轮。
+    普通拖动过程不按任何鼠标键，不会“拖一下就点一下”。鼠标开启时所有触摸
+    在 overlay 根部截断，内核收不到任何 `FINGER_*`，触摸手势被完全隔离；
+  - 右上角工具条：鼠标/键盘开关、系统输入法、设置、收起；收起只把工具条
+    缩成一个圆形「≡」，当前控件保持显示；收起状态会记住；
+  - 设置页可调手柄大小、光标大小、透明度、是否显示操作提示；
+    配置存在 `SharedPreferences("nimbus_vinput")`，对所有内核生效；
+  - 全局设置 → 游戏内控件 → 「启用游戏内虚拟手柄 / 鼠标」是总开关；关掉后
+    游戏里不挂任何悬浮控件（包括右上角「≡」），下次启动游戏生效；
+  - 注入只走 `SDLActivity.onNativeMouse / onNativeKeyDown / onNativeKeyUp`，
+    不新增 `.so`；`krkrsdl3` 的 Android 构建已打开鼠标事件分支并过滤
+    `SDL_TOUCH_MOUSEID`，openartemis / onscripter 原本就接受 SDL 鼠标事件。
+    光标坐标是 Surface 像素，各内核再自行映射到逻辑分辨率。
 - 需要 `VCPKG_ROOT`、`ANDROID_NDK_HOME`（r28）、`ANDROID_HOME`、JDK 17。
 
 ## HarmonyOS（结构多内核，krkrsdl3 原生）
